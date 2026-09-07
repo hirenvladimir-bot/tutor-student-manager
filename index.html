@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>知行 · 家教学生管理</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">Z</span><span>知行</span></div>
+      <button class="add-student" id="openStudentDialog">＋ 添加学生</button>
+      <div class="sidebar-label"><span>学生档案</span><span id="studentCount">0</span></div>
+      <div class="student-list" id="studentList"></div>
+      <div class="sidebar-foot">数据仅保存于此浏览器</div>
+    </aside>
+
+    <section class="workspace">
+      <div id="emptyState" class="empty-state">
+        <div class="empty-icon">✦</div>
+        <h1>开始建立学生档案</h1>
+        <p>记录学习轨迹，让每一次课程都更有方向。</p>
+        <button class="primary-btn" id="emptyAddButton">添加第一位学生</button>
+      </div>
+
+      <div id="studentView" hidden>
+        <header class="topbar">
+          <div class="title-block">
+            <div class="eyebrow" id="studentMeta">学生档案</div>
+            <h1 id="studentNameTitle">—</h1>
+          </div>
+          <div class="header-actions">
+            <button class="sync-indicator" id="openDataDialog" title="数据备份与同步"><span class="sync-dot" id="syncDot"></span><span id="syncStatus">本地保存</span></button>
+            <button class="outline-btn" id="quickSyncBtn">☁ 同步</button>
+            <button class="outline-btn" id="editStudentBtn">编辑资料</button>
+            <button class="icon-btn danger" id="deleteStudentBtn" title="删除学生">⌫</button>
+          </div>
+        </header>
+
+        <div class="content-grid">
+          <div class="main-column">
+            <section class="overview-card card">
+              <div class="score-ring" id="scoreRing"><span id="currentScore">—</span><small>目前分数</small></div>
+              <div class="overview-detail">
+                <div class="school-row"><div><span class="field-label">就读学校</span><strong id="schoolText">—</strong></div><div><span class="field-label">目标学校</span><strong id="targetSchoolText">—</strong></div></div>
+                <p class="overview-hint">用清晰记录陪伴每一步进步</p>
+              </div>
+            </section>
+
+            <section class="card chart-card">
+              <div class="section-head"><div><span class="section-kicker">学习表现</span><h2>考试成绩趋势</h2></div><button class="small-primary" id="addScoreBtn">＋ 记录成绩</button></div>
+              <div class="chart-wrap"><canvas id="scoreChart" aria-label="考试成绩趋势图"></canvas><div id="noScores" class="no-data">还没有成绩记录<br><button id="noScoreButton">添加第一次考试成绩</button></div></div>
+              <div class="score-history" id="scoreHistory"></div>
+            </section>
+
+            <section class="card notes-card">
+              <div class="section-head"><div><span class="section-kicker">教学备忘</span><h2>课程重点</h2></div><button class="text-btn" id="saveNotesBtn">保存更改</button></div>
+              <div class="note-grid">
+                <label>下节课要讲的内容<textarea id="nextLesson" placeholder="例如：二次函数的图像与性质"></textarea></label>
+                <label>着重要听的内容<textarea id="focusContent" placeholder="例如：审题习惯、函数定义域"></textarea></label>
+              </div>
+            </section>
+
+            <section class="card course-card">
+              <div class="section-head"><div><span class="section-kicker">课程轨迹</span><h2>课程进度</h2></div><button class="small-primary" id="addCourseBtn">＋ 追加进度</button></div>
+              <form class="quick-add" id="courseForm"><input id="courseInput" maxlength="120" placeholder="例如：完成一次函数综合题练习" aria-label="新增课程进度" /><button type="submit">添加</button></form>
+              <div class="course-list" id="courseList"></div>
+            </section>
+          </div>
+
+          <aside class="right-column">
+            <section class="card goal-card"><span class="section-kicker">分数目标</span><div class="goal-number"><span id="targetScore">—</span><small>分</small></div><p id="goalHint">设定目标，稳步前进</p></section>
+            <section class="card custom-card"><div class="section-head"><div><span class="section-kicker">自定义档案</span><h2>其他信息</h2></div><button class="text-btn" id="addCustomBtn">＋ 添加</button></div><div id="customFields" class="custom-fields"></div></section>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="studentDialog" class="modal"><form method="dialog" id="studentForm"><div class="modal-head"><div><span class="section-kicker">学生资料</span><h2 id="studentDialogTitle">添加学生</h2></div><button type="button" class="close" id="closeStudentDialog">×</button></div><div class="form-grid"><label>姓名<input name="name" required placeholder="例如：林小雨" /></label><label>就读学校<input name="school" placeholder="例如：育才中学" /></label><label>目标学校<input name="targetSchool" placeholder="例如：市实验中学" /></label><label>目前分数<input name="currentScore" type="text" placeholder="例如：82/100、待测" /></label><label>目标分数<input name="targetScore" type="text" placeholder="例如：90 分、120/150" /></label></div><div class="modal-actions"><button type="button" id="cancelStudentDialog" class="outline-btn">取消</button><button class="primary-btn" value="default">保存档案</button></div></form></dialog>
+
+  <dialog id="scoreDialog" class="modal compact"><form method="dialog" id="scoreForm"><div class="modal-head"><div><span class="section-kicker">考试记录</span><h2>添加成绩</h2></div><button class="close" value="cancel">×</button></div><div class="form-grid one-col"><label>考试名称<input name="label" required placeholder="例如：九月月考" /></label><label>考试日期<input name="date" type="date" required /></label><label>分数<input name="score" required type="text" inputmode="decimal" placeholder="例如：86 或 86.5" /></label></div><div class="modal-actions"><button value="cancel" class="outline-btn">取消</button><button class="primary-btn" value="default">记录成绩</button></div></form></dialog>
+
+  <dialog id="customDialog" class="modal compact"><form method="dialog" id="customForm"><div class="modal-head"><div><span class="section-kicker">扩展档案</span><h2>添加信息</h2></div><button class="close" value="cancel">×</button></div><div class="form-grid one-col"><label>字段名称<input name="key" required placeholder="例如：家长联系方式" /></label><label>内容<input name="value" required placeholder="例如：138 0000 0000" /></label></div><div class="modal-actions"><button value="cancel" class="outline-btn">取消</button><button class="primary-btn" value="default">添加</button></div></form></dialog>
+
+  <dialog id="dataDialog" class="modal data-modal"><form method="dialog"><div class="modal-head"><div><span class="section-kicker">数据中心</span><h2>备份与云端同步</h2></div><button class="close" value="cancel">×</button></div><div class="data-sections"><section><div class="data-icon">⇅</div><div><h3>本地备份</h3><p>可使用 JSON 完整备份，或用 Markdown／文字格式整理、分享和回导档案。</p></div><div class="data-actions"><button type="button" class="outline-btn" id="exportBtn">导出 JSON</button><button type="button" class="outline-btn" id="exportMarkdownBtn">导出 Markdown</button><button type="button" class="outline-btn" id="exportTextBtn">导出文字</button><label class="outline-btn import-label">导入文件<input type="file" id="importInput" accept="application/json,.json,.md,.markdown,.txt,text/plain,text/markdown" hidden /></label></div></section><section><div class="data-icon cloud-icon">☁</div><div><h3>联网同步</h3><p id="cloudSummary">尚未连接云端服务</p></div><div class="data-actions"><button type="button" class="outline-btn" id="openCloudSettings">同步设置</button><button type="button" class="primary-btn" id="pushBtn">上传到云端</button><button type="button" class="outline-btn" id="pullBtn">从云端拉取</button></div></section></div><p class="data-note" id="dataMessage" aria-live="polite">所有档案优先保存在本机浏览器中。</p></form></dialog>
+
+  <dialog id="cloudDialog" class="modal compact"><form method="dialog" id="cloudForm"><div class="modal-head"><div><span class="section-kicker">账号同步</span><h2 id="authTitle">登录云端</h2></div><button class="close" value="cancel">×</button></div><p class="helper">使用邮箱和密码登录。你的档案将只对当前账号可见，并自动同步到其他已登录设备。</p><div class="form-grid one-col"><label>邮箱<input name="email" type="email" required autocomplete="email" placeholder="name@example.com" /></label><label>密码<input name="password" type="password" required minlength="6" autocomplete="current-password" placeholder="至少 6 位" /></label><label class="switch-row"><input name="auto" type="checkbox" checked /> 修改后自动同步</label></div><p class="auth-message" id="authMessage" aria-live="polite"></p><button type="button" class="text-btn" id="resendConfirmBtn">没有收到确认邮件？重新发送</button><div class="modal-actions"><button type="button" class="text-btn" id="authModeBtn">没有账号？注册</button><span class="modal-spacer"></span><button value="cancel" class="outline-btn">取消</button><button class="primary-btn" value="default" id="authSubmitBtn">登录并同步</button></div></form></dialog>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
