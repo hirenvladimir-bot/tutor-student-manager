@@ -14,7 +14,7 @@
       <button class="add-student" id="openStudentDialog">＋ 添加学生</button>
       <div class="sidebar-label"><span>学生档案</span><span id="studentCount">0</span></div>
       <div class="student-list" id="studentList"></div>
-      <div class="sidebar-foot">数据仅保存于此浏览器</div>
+      <div class="sidebar-bottom"><button class="sidebar-auth" id="sidebarAuthButton"><span class="sidebar-auth-dot" id="syncDot"></span><span id="syncStatus">登录并同步</span></button><div class="sidebar-foot" id="sidebarStorageText">数据仅保存于此浏览器</div></div>
     </aside>
 
     <section class="workspace">
@@ -32,8 +32,6 @@
             <h1 id="studentNameTitle">—</h1>
           </div>
           <div class="header-actions">
-            <button class="sync-indicator" id="openDataDialog" title="数据备份与同步"><span class="sync-dot" id="syncDot"></span><span id="syncStatus">本地保存</span></button>
-            <button class="outline-btn" id="quickSyncBtn">☁ 同步</button>
             <button class="outline-btn" id="editStudentBtn">编辑资料</button>
             <button class="icon-btn danger" id="deleteStudentBtn" title="删除学生">⌫</button>
           </div>
