@@ -110,8 +110,18 @@ test('an expired cached account is not presented as signed in', async ({ page })
   await expect(page.locator('#cloudSummary')).toHaveText('尚未登录同步账号');
 });
 
+test('local interface becomes ready without waiting for cloud restoration', async ({ page }) => {
+  await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true');
+  const source = await page.locator('script[src*="app.js"]').getAttribute('src');
+  expect(source).toContain('v=44');
+  const bootstrapSource = await page.evaluate(() => bootstrap.toString());
+  expect(bootstrapSource).not.toContain('await restoreSession');
+  expect(bootstrapSource).toContain('restoreSession().then');
+});
+
 test('cloud diagnostic button is wired and remains inside the data center', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true');
+  await page.evaluate(() => window.__restoreSessionPromise);
   await page.evaluate(async () => {
     cloud.userEmail = 'diagnostic@example.com';
     supabaseClient.auth.getSession = async () => ({ data: { session: { user: { id: 'diagnostic-user' } } }, error: null });
