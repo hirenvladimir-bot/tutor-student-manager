@@ -240,10 +240,17 @@ test('readable Markdown remains importable without the embedded machine backup',
     }] });
     const readable = markdownBackup(false).replace(/\n\n\[\[ZHIXING_V2:[A-Za-z0-9+/=]+\]\]\s*$/, '');
     const restored = parsePortableTextBackup(readable).students[0];
+    const plainText = markdownBackup(true).replace(/\n\n\[\[ZHIXING_V2:[A-Za-z0-9+/=]+\]\]\s*$/, '');
+    const plain = parsePortableTextBackup(plainText).students[0];
     return {
       current: restored.currentScore, target: restored.targetScore, score: restored.scores[0]?.score,
       prep: restored.preparations[0], course: restored.courseProgress[0], custom: restored.custom[0],
-      nextLesson: restored.nextLesson, focusContent: restored.focusContent
+      nextLesson: restored.nextLesson, focusContent: restored.focusContent,
+      plain: {
+        current: plain.currentScore, target: plain.targetScore, score: plain.scores[0]?.score,
+        prep: plain.preparations[0], course: plain.courseProgress[0], custom: plain.custom[0],
+        nextLesson: plain.nextLesson, focusContent: plain.focusContent
+      }
     };
   });
   expect(result.current).toBe('待测');
@@ -256,6 +263,16 @@ test('readable Markdown remains importable without the embedded machine backup',
   expect(result.custom).toEqual(expect.objectContaining({ key: '教材', value: '人教版' }));
   expect(result.nextLesson).toBe('函数');
   expect(result.focusContent).toBe('审题');
+  expect(result.plain.current).toBe('待测');
+  expect(result.plain.target).toBe('A档');
+  expect(result.plain.score).toBe(86.5);
+  expect(result.plain.prep).toMatchObject({ title: '备课一', content: '讲义安排' });
+  expect(result.plain.prep.files[0]).toMatchObject({ name: '讲义.pdf', relativePath: '资料/讲义.pdf', path: 'u/a/p/guide.pdf', size: 123 });
+  expect(result.plain.course).toMatchObject({ title: '一次函数', content: '已掌握' });
+  expect(result.plain.course.files[0]).toMatchObject({ name: '作业.docx', path: 'u/a/q/homework.docx', size: 456 });
+  expect(result.plain.custom).toEqual(expect.objectContaining({ key: '教材', value: '人教版' }));
+  expect(result.plain.nextLesson).toBe('函数');
+  expect(result.plain.focusContent).toBe('审题');
 });
 
 test('preparation and course attachment buttons both start a safe download', async ({ page }) => {
@@ -292,12 +309,20 @@ test('logout clears all local records, pending files and cleanup work', async ({
   await page.locator('[name=name]').fill('退出测试');
   await page.getByRole('button', { name: '保存档案' }).click();
   await page.evaluate(async () => {
+    await persistQueue;
     cloud.userEmail = 'test@example.com';
     localStorage.setItem(cloudKey, JSON.stringify(cloud));
     await Zhixing.Database.put('blobs', { key: 'blob:test', dataUrl: 'data:text/plain;base64,QQ==' });
     await Zhixing.Database.put('cleanup', { key: 'u/test.pdf', path: 'u/test.pdf', attempts: 1 });
     localStorage.setItem('tus::pending-upload::1', JSON.stringify({ uploadUrl: 'https://storage.invalid/upload' }));
     supabaseClient.auth.signOut = async () => ({ error: null });
+    const persist = Zhixing.Database.persist;
+    Zhixing.Database.persist = async (...args) => {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      return persist(...args);
+    };
+    active().nextLesson = '退出前尚未落盘的编辑';
+    save();
     render();
   });
   await page.locator('#sidebarAuthButton').click();
@@ -307,6 +332,7 @@ test('logout clears all local records, pending files and cleanup work', async ({
   await logout.click();
   await page.locator('#confirmAccept').click();
   await expect(page.getByRole('heading', { name: '开始建立学生档案' })).toBeVisible();
+  await page.waitForTimeout(300);
   const local = await page.evaluate(async () => ({
     profile: localStorage.getItem(storeKey),
     tus: localStorage.getItem('tus::pending-upload::1'),

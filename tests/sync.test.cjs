@@ -174,6 +174,18 @@ test('sync processes a bounded batch instead of flooding the network', async () 
   assert.equal((await ZX.Database.all('outbox')).length, 5);
 });
 
+test('legacy compatibility snapshot failures make the sync visibly fail', async () => {
+  const ZX = loadDevice();
+  const cloud = mockCloud('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee');
+  await startDevice(ZX, cloud.client, { students: [], activeId: null });
+  const from = cloud.client.from;
+  cloud.client.from = table => table === 'tutor_profiles'
+    ? { upsert: async () => ({ error: new Error('snapshot denied') }) }
+    : from(table);
+
+  assert.equal(await ZX.Sync.sync(), false);
+});
+
 test('production TUS endpoint uses the direct Supabase Storage hostname', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   assert.match(source, /nnnxsjqbklnykshqgntt\.storage\.supabase\.co\/storage\/v1\/upload\/resumable/);

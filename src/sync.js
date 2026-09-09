@@ -101,7 +101,8 @@
   }
   async function writeLegacySnapshot() {
     const state = await ZX.Database.state();
-    await client.from('tutor_profiles').upsert({ user_id: userId, data: state, updated_at: new Date().toISOString() });
+    const { error } = await client.from('tutor_profiles').upsert({ user_id: userId, data: state, updated_at: new Date().toISOString() });
+    if (error) throw new Error(`兼容快照写入失败：${error.message || error}`);
   }
   async function subscribe() {
     if (channel) await client.removeChannel(channel);
