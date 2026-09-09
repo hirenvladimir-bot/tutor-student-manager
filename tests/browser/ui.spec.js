@@ -143,6 +143,20 @@ test('free-form scores save and progress records can be edited', async ({ page }
   await expect(page.locator('#courseDialog h2')).toHaveText('编辑进度');
 });
 
+test('custom information deletes immediately without a confirmation dialog', async ({ page }) => {
+  await page.getByRole('button', { name: '添加第一位学生' }).click();
+  await page.locator('#studentForm [name=name]').fill('自定义信息测试');
+  await page.getByRole('button', { name: '保存档案' }).click();
+  await page.locator('#addCustomBtn').click();
+  await page.locator('#customForm [name=key]').fill('备注');
+  await page.locator('#customForm [name=value]').fill('可直接删除');
+  await page.locator('#customForm button[value=default]').click();
+  await expect(page.locator('.custom-field')).toHaveCount(1);
+  await page.locator('.remove-custom').click();
+  await expect(page.locator('.custom-field')).toHaveCount(0);
+  await expect(page.locator('#confirmDialog')).not.toHaveAttribute('open', '');
+});
+
 test('modified optional dialog uses in-app confirmation and has no overflow', async ({ page }) => {
   await page.getByRole('button', { name: '添加第一位学生' }).click();
   await page.locator('[name=name]').fill('未保存');

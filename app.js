@@ -46,7 +46,7 @@ function render(){
   $('#goalHint').textContent=targetNumber!==null&&currentNumber!==null?`距离目标还差 ${Math.max(0,targetNumber-currentNumber)} 分`:'已使用自由格式记录分数目标';
   $('#nextLesson').value=s.nextLesson||''; $('#focusContent').value=s.focusContent||'';
   $('#customFields').innerHTML=(s.custom||[]).map((f,i)=>`<div class="custom-field"><span>${esc(f.key)}</span><strong>${esc(f.value)}</strong><button class="remove-custom" data-i="${i}" title="删除">×</button></div>`).join('')||'<div class="no-data" style="position:static;display:block;text-align:left">添加需要长期记录的信息</div>';
-  document.querySelectorAll('.remove-custom').forEach(b=>b.onclick=async()=>{if(!await ask('删除这条自定义信息吗？',{title:'删除信息',danger:true}))return;s.custom.splice(+b.dataset.i,1);save();render();});
+  document.querySelectorAll('.remove-custom').forEach(b=>b.onclick=()=>{s.custom.splice(+b.dataset.i,1);save();render();});
   const scores=(s.scores||[]).slice().sort((a,b)=>a.date.localeCompare(b.date));
   $('#scoreHistory').innerHTML=scores.map((x,i)=>`<span class="score-chip">${esc(x.label)} <b>${x.score}</b> <button class="remove-score" data-i="${i}" title="删除">×</button></span>`).join('');
   document.querySelectorAll('.remove-score').forEach(b=>b.onclick=async()=>{if(!await ask('删除这条考试成绩吗？',{title:'删除成绩',danger:true}))return;const original=scores[+b.dataset.i];s.scores.splice(s.scores.indexOf(original),1);save();render();});
