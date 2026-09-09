@@ -131,3 +131,45 @@ test('preparation and course attachment buttons both start a safe download', asy
     { href: 'data:text/plain;base64,Qg==', name: '进度.txt' }
   ]);
 });
+
+test('logout clears all local records, pending files and cleanup work', async ({ page }) => {
+  await page.getByRole('button', { name: '添加第一位学生' }).click();
+  await page.locator('[name=name]').fill('退出测试');
+  await page.getByRole('button', { name: '保存档案' }).click();
+  await page.evaluate(async () => {
+    cloud.userEmail = 'test@example.com';
+    localStorage.setItem(cloudKey, JSON.stringify(cloud));
+    await Zhixing.Database.put('blobs', { key: 'blob:test', dataUrl: 'data:text/plain;base64,QQ==' });
+    await Zhixing.Database.put('cleanup', { key: 'u/test.pdf', path: 'u/test.pdf', attempts: 1 });
+    supabaseClient.auth.signOut = async () => ({ error: null });
+    render();
+  });
+  await page.locator('#sidebarAuthButton').click();
+  const logout = page.locator('#logoutFromDataBtn');
+  await expect(logout).toBeVisible();
+  await expect(logout).toHaveCSS('border-style', 'solid');
+  await logout.click();
+  await page.locator('#confirmAccept').click();
+  await expect(page.getByRole('heading', { name: '开始建立学生档案' })).toBeVisible();
+  const local = await page.evaluate(async () => ({
+    profile: localStorage.getItem(storeKey),
+    email: JSON.parse(localStorage.getItem(cloudKey) || '{}').userEmail,
+    counts: await Promise.all(['records','outbox','conflicts','blobs','cleanup','meta'].map(name => Zhixing.Database.all(name).then(items => items.length)))
+  }));
+  expect(local).toEqual({ profile: null, email: '', counts: [0,0,0,0,0,0] });
+});
+
+test('responsive layout avoids body zoom and horizontal overflow at a 200% equivalent viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 640, height: 720 });
+  await page.getByRole('button', { name: '添加第一位学生' }).click();
+  await page.locator('[name=name]').fill('缩放测试');
+  await page.getByRole('button', { name: '保存档案' }).click();
+  const layout = await page.evaluate(() => ({
+    zoom: getComputedStyle(document.body).zoom || '1',
+    overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+  }));
+  expect(['1', 'normal']).toContain(layout.zoom);
+  expect(layout.overflow).toBeFalsy();
+  await page.locator('#sidebarAuthButton').click();
+  await expect(page.locator('#dataDialog')).toHaveAttribute('open', '');
+});
