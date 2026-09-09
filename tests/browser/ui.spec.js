@@ -134,6 +134,13 @@ test('preparation and course attachment buttons both start a safe download', asy
     { href: 'data:text/plain;base64,QQ==', name: '备课.txt' },
     { href: 'data:text/plain;base64,Qg==', name: '进度.txt' }
   ]);
+
+  await page.locator('.prep-attachment').click();
+  await expect(page.locator('#confirmDialog')).not.toHaveAttribute('open', '');
+  await expect(page.locator('#prepList')).not.toContainText('备课.txt');
+  await page.locator('.course-attachment').click();
+  await expect(page.locator('#confirmDialog')).not.toHaveAttribute('open', '');
+  await expect(page.locator('#courseList')).not.toContainText('进度.txt');
 });
 
 test('logout clears all local records, pending files and cleanup work', async ({ page }) => {

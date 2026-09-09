@@ -54,12 +54,12 @@ function render(){
   document.querySelectorAll('.remove-course').forEach(b=>b.onclick=async()=>{if(!await ask('删除这条课程进度及其附件吗？',{title:'删除课程进度',danger:true}))return;course.splice(+b.dataset.i,1);s.courseProgress=course;save();render();});
   document.querySelectorAll('.edit-course').forEach(b=>b.onclick=()=>openCourseEditor(+b.dataset.i));
   document.querySelectorAll('.course-file').forEach(b=>b.onclick=downloadStoredFile(course[+b.dataset.i].files[+b.dataset.file]));
-  document.querySelectorAll('.course-attachment').forEach(b=>b.onclick=async()=>{if(!await ask('从这条课程进度中移除该文件吗？',{title:'删除附件',danger:true}))return;course[+b.dataset.i].files.splice(+b.dataset.file,1);save();render();});
+  document.querySelectorAll('.course-attachment').forEach(b=>b.onclick=()=>{course[+b.dataset.i].files.splice(+b.dataset.file,1);save();render();});
   const preparations=s.preparations||[];$('#prepList').innerHTML=preparations.map((item,i)=>`<article class="prep-item"><div class="prep-item-head"><div><h3>${esc(item.title)}</h3><time>${esc(item.date)}</time></div><div class="item-actions"><button class="edit-prep" data-i="${i}" type="button">编辑</button><button class="remove-prep" data-i="${i}" type="button" aria-label="删除这次备课">×</button></div></div>${item.content?`<p>${esc(item.content).replace(/\n/g,'<br>')}</p>`:''}${item.files?.length?`<div class="prep-files">${item.files.map((file,j)=>attachmentMarkup(file,i,j,'prep')).join('')}</div>`:''}</article>`).join('')||'<p class="course-empty">还没有备课条目。点击“添加备课”开始记录。</p>';
   document.querySelectorAll('.remove-prep').forEach(b=>b.onclick=async()=>{if(!await ask('删除这次备课及其附件吗？',{title:'删除备课',danger:true}))return;preparations.splice(+b.dataset.i,1);s.preparations=preparations;save();render();});
   document.querySelectorAll('.edit-prep').forEach(b=>b.onclick=()=>openPrepEditor(+b.dataset.i));
   document.querySelectorAll('.prep-file:not(.course-file)').forEach(b=>b.onclick=downloadStoredFile(preparations[+b.dataset.i].files[+b.dataset.file]));
-  document.querySelectorAll('.prep-attachment').forEach(b=>b.onclick=async()=>{if(!await ask('从这次备课中移除该文件吗？',{title:'删除附件',danger:true}))return;preparations[+b.dataset.i].files.splice(+b.dataset.file,1);save();render();});
+  document.querySelectorAll('.prep-attachment').forEach(b=>b.onclick=()=>{preparations[+b.dataset.i].files.splice(+b.dataset.file,1);save();render();});
   $('#noScores').style.display=scores.length?'none':'grid'; drawChart(scores);
 }
 function drawChart(data){
