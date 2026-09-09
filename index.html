@@ -100,6 +100,6 @@
   <dialog id="cloudDialog" class="modal compact"><form method="dialog" id="cloudForm"><div class="modal-head"><div><span class="section-kicker">账号同步</span><h2 id="authTitle">登录云端</h2></div><button type="button" class="close" id="closeCloudDialog">×</button></div><p class="helper">使用邮箱和密码登录。你的档案将只对当前账号可见，并自动同步到其他已登录设备。</p><div class="form-grid one-col"><label>邮箱<input name="email" type="email" required autocomplete="username email" placeholder="name@example.com" /></label><label>密码<input name="password" type="password" required minlength="6" autocomplete="current-password" placeholder="至少 6 位" /></label><label class="switch-row"><input name="auto" type="checkbox" checked /> 修改后自动同步</label></div><p class="auth-message" id="authMessage" aria-live="polite"></p><button type="button" class="text-btn" id="resendConfirmBtn">没有收到确认邮件？重新发送</button><div class="modal-actions"><button type="button" class="text-btn logout-btn" id="logoutBtn" hidden>退出账号</button><button type="button" class="text-btn" id="authModeBtn">没有账号？注册</button><span class="modal-spacer"></span><button type="button" id="cancelCloudDialog" class="outline-btn">取消</button><button class="primary-btn" value="default" id="authSubmitBtn">登录并同步</button></div></form></dialog>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.3.1/dist/tus.min.js"></script>
-  <script src="app.js?v=20"></script>
+  <script src="app.js?v=21"></script>
 </body>
 </html>
