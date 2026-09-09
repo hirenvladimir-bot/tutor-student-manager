@@ -93,6 +93,25 @@ test('TUS upload resumes a previous fingerprint and preserves a folder path', as
   assert.ok(status.some(message => /100%/.test(message)));
 });
 
+test('a local batch cache failure rolls back blobs already stored for that batch', async () => {
+  const ZX = load();
+  const put = ZX.Database.put;
+  let firstBlobKey = '';
+  ZX.Database.put = async (store, value) => {
+    if (store === 'blobs') {
+      firstBlobKey ||= value.key;
+      if (value.key !== firstBlobKey) throw new Error('quota exceeded');
+    }
+    return put(store, value);
+  };
+
+  await assert.rejects(
+    ZX.Files.prepare([mockFile('一.pdf'), mockFile('二.pdf')], 'preparations', 'prep-a', 'student-a'),
+    /本批已暂存文件已回滚/
+  );
+  assert.equal((await ZX.Database.all('blobs')).length, 0);
+});
+
 test('a partial upload failure keeps successful paths and queues only failed files locally', async () => {
   let uploadIndex = 0;
   class Upload {

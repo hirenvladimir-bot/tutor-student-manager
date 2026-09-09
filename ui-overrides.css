@@ -9,6 +9,8 @@ body{font-size:16px}.student-item{font-size:15px}.student-item small,.sidebar-la
 /* Unified fields in preparation and progress dialogs */
 .form-grid textarea{min-height:92px;resize:vertical;border:1px solid #d5e2f0;border-radius:10px;padding:11px 12px;background:#fbfdff;color:#102a43;font:14px/1.55 inherit;outline-color:#69aaf1}.form-grid textarea:focus{border-color:#6da4ef;box-shadow:0 0 0 3px #dcecff}.file-picker>input[type=file]{width:100%;border:1px solid #d5e2f0;border-radius:10px;padding:8px;background:#fbfdff;color:#657d99;font:13px inherit;cursor:pointer}.file-picker>input[type=file]:hover{border-color:#8cb8ed;background:#f6faff}.file-picker>input[type=file]::file-selector-button{margin-right:10px;border:0;border-radius:7px;padding:7px 10px;background:#e7f1ff;color:#2566ad;font:700 12px inherit;cursor:pointer}.file-picker>input[type=file]::file-selector-button:hover{background:#d7eaff}
 .folder-picker{display:flex;align-items:center;gap:9px;margin-top:8px}.folder-picker button{border:1px dashed #9cc0eb;border-radius:8px;padding:7px 9px;background:#f4f9ff;color:#2868ad;font:700 12px inherit;cursor:pointer}.folder-picker button:hover{background:#e7f2ff;border-style:solid}.folder-picker span{color:#8296ad;font-size:11px;font-weight:500}
+.file-picker>span.error{color:#b42318;font-weight:650}
+.prep-files .pending-overflow{border:1px dashed #aec9e8;border-radius:8px;padding:6px 9px;background:#f4f8fd;color:#526f8f;font-weight:600;white-space:normal}
 
 /* v2 stability and responsive overrides */
 @media(min-width:900px){body{font-size:18px}.workspace{max-width:1680px}.student-item{font-size:16px}.section-head h2{font-size:22px}.form-grid input,.form-grid textarea{font-size:16px}}

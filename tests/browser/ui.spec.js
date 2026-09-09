@@ -219,6 +219,45 @@ test('offline attachment is queued without losing preparation text', async ({ pa
   expect(await page.evaluate(() => Zhixing.Database.all('blobs').then(items => items.length))).toBe(0);
 });
 
+test('attachment cache failure keeps preparation text in the editor and avoids a native alert', async ({ page }) => {
+  await page.getByRole('button', { name: '添加第一位学生' }).click();
+  await page.locator('[name=name]').fill('缓存失败测试');
+  await page.getByRole('button', { name: '保存档案' }).click();
+  await page.getByRole('button', { name: '＋ 添加备课' }).click();
+  await page.locator('#prepForm [name=title]').fill('不能丢失的标题');
+  await page.locator('#prepForm [name=content]').fill('不能丢失的内容');
+  await page.locator('#prepForm [name=files]').setInputFiles({ name: '过大.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-test') });
+  await page.evaluate(() => { Zhixing.Files.prepare = async () => { throw new Error('浏览器存储空间不足'); }; });
+  let nativeDialog = false;
+  page.once('dialog', async dialog => { nativeDialog = true; await dialog.dismiss(); });
+  await page.getByRole('button', { name: '保存备课' }).click();
+  await expect(page.locator('#prepDialog')).toHaveAttribute('open', '');
+  await expect(page.locator('#prepForm [name=title]')).toHaveValue('不能丢失的标题');
+  await expect(page.locator('#prepForm [name=content]')).toHaveValue('不能丢失的内容');
+  await expect(page.locator('#prepFilesHint')).toHaveClass(/error/);
+  await expect(page.locator('#prepFilesHint')).toContainText('浏览器存储空间不足');
+  expect(nativeDialog).toBe(false);
+});
+
+test('large failed upload batches do not flood the student view', async ({ page }) => {
+  await page.getByRole('button', { name: '添加第一位学生' }).click();
+  await page.locator('[name=name]').fill('大量附件测试');
+  await page.getByRole('button', { name: '保存档案' }).click();
+  await page.evaluate(() => {
+    const files = [
+      { id: 'uploaded-a', name: '已上传一.pdf', path: 'u/a.pdf', pending: false },
+      { id: 'uploaded-b', name: '已上传二.pdf', path: 'u/b.pdf', pending: false },
+      ...Array.from({ length: 100 }, (_, index) => ({ id: `pending-${index}`, name: `待上传-${index}.pdf`, pending: true, localBlobKey: `blob-${index}` }))
+    ];
+    active().preparations = [{ id: 'many-files', title: '异常批量上传', content: '', date: '9/9', files }];
+    render();
+  });
+  await expect(page.locator('#prepList .attachment')).toHaveCount(22);
+  await expect(page.locator('#prepList .pending-overflow')).toHaveText('另有 80 个待上传附件，请在数据中心处理');
+  await expect(page.locator('#prepList')).toContainText('已上传一.pdf');
+  expect(await page.locator('#prepList').evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false);
+});
+
 test('Markdown backup round-trip preserves preparations, attachments and free-form scores', async ({ page }) => {
   const result = await page.evaluate(() => {
     const sample = { activeId: 'a', students: [{ id: 'a', name: '导出测试', currentScore: '待测', targetScore: 'A档', school: '', targetSchool: '', nextLesson: '', focusContent: '', scores: [], custom: [], courseProgress: [], preparations: [{ id: 'p', title: '备课', content: '内容', date: '9/9', files: [{ id: 'f', name: '资料.pdf', path: 'u/s/p/f.pdf', type: 'application/pdf', size: 8 }] }] }] };

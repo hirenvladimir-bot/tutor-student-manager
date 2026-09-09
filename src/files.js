@@ -83,12 +83,15 @@
   }
   async function prepare(files, section, recordId, studentId, status = () => {}) {
     const list = [...files];
-    const result = [];
+    const result = [], cachedKeys = [];
     for (let index = 0; index < list.length; index++) {
       const file = list[index], id = uuid(), relativePath = file.webkitRelativePath || '', localBlobKey = `blob:${id}`;
       const item = { id, name: file.name, relativePath, type: file.type || 'application/octet-stream', size: file.size, path: '', pending: true, localBlobKey };
-      try { await cacheFile(localBlobKey, file); status(`已安全保存 ${index + 1}/${list.length}：${file.name}，后台将自动上传`); }
-      catch (error) { throw new Error(`无法暂存 ${file.name}：${error.message || error.name || '浏览器存储空间不足'}`); }
+      try { await cacheFile(localBlobKey, file); cachedKeys.push(localBlobKey); status(`已安全保存 ${index + 1}/${list.length}：${file.name}，后台将自动上传`); }
+      catch (error) {
+        await Promise.all(cachedKeys.map(key => ZX.Database.remove('blobs', key).catch(() => {})));
+        throw new Error(`无法暂存 ${file.name}，本批已暂存文件已回滚：${error.message || error.name || '浏览器存储空间不足'}`);
+      }
       result.push(item);
     }
     return result;
