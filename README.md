@@ -1,6 +1,6 @@
 # 知行 · 家教学生管理
 
-一个无需安装依赖的本地小应用。直接用浏览器打开 `index.html` 即可使用。
+一个无需安装运行时依赖的本地优先小应用。直接用浏览器打开 `index.html`，或使用 GitHub Pages 即可使用。Supabase 与 TUS 浏览器脚本已经固定在 `vendor/`，首次离线打开也不会因为 CDN 不可用而失效。
 
 功能包括：
 
@@ -19,14 +19,25 @@
 - **导入文件**：可导入本应用导出的 JSON、Markdown 或文字文件；导入后会覆盖当前本地档案。
 - **联网同步**：在“同步设置”中用邮箱和密码注册或登录 Supabase 账号。登录后，应用会先拉取该账号的云端档案，再上传当前档案；开启“修改后自动同步”时，本地改动会在约 1.2 秒的防抖后上传。也可手动“上传到云端”或“从云端拉取”。
 
-云端数据保存在 Supabase 的 `public.tutor_profiles` 表中：每个已登录用户以自己的 `auth.users.id` 作为 `user_id`，对应一条包含完整档案的 `data` JSONB 记录。应用不再使用自定义 JSON 接口、`GET`／`PUT` 协议或 Bearer Token 配置。
+稳定重构版会将云端数据按学生、成绩、备课、课程进度、自定义字段和附件拆分保存，并通过版本号逐条同步。旧版 `public.tutor_profiles` 会继续生成兼容快照，作为迁移与回滚来源。
 
 ### Supabase 配置与实时同步
 
-1. 在 Supabase Dashboard 的 SQL Editor 运行 [supabase-schema.sql](./supabase-schema.sql)，创建 `tutor_profiles` 并启用行级安全策略（RLS）。
-2. 再运行 [supabase-realtime.sql](./supabase-realtime.sql)，将该表加入 Realtime 发布；这样，同一账号在另一台已打开设备上的修改会自动推送到当前页面。
-3. 在 Supabase Authentication 中启用 Email 登录，并按需要启用邮箱确认。注册时，应用会发送确认邮件；确认后请返回页面登录。
-4. 在 Authentication 的 URL Configuration 中，将 GitHub Pages 地址 `https://hirenvladimir-bot.github.io/tutor-student-manager/` 加入 **Redirect URLs**（并将其设为 Site URL 或保留为允许的回调地址）。应用注册和重发确认邮件时会使用当前页面所在目录作为回调地址，因此生产部署地址必须在允许列表中。若本地预览，也应将实际本地地址加入允许列表。
+1. 首次配置仍运行 [supabase-schema.sql](./supabase-schema.sql) 和 [supabase-realtime.sql](./supabase-realtime.sql)。
+2. 升级稳定重构版时，再运行 [supabase-schema-v2.sql](./supabase-schema-v2.sql)。脚本可重复执行，不删除旧表，并会在首次登录迁移时把旧 JSON 保存到 `tutor_profile_backups`。
+3. 新版使用 `apply_tutor_mutations` 对每条记录执行乐观版本检查；不同记录可自动合并，同一记录的冲突会保留在数据中心供选择。
+4. 在 Supabase Authentication 中启用 Email 登录，并按需要启用邮箱确认。注册时，应用会发送确认邮件；确认后请返回页面登录。
+5. 在 Authentication 的 URL Configuration 中，将 GitHub Pages 地址 `https://hirenvladimir-bot.github.io/tutor-student-manager/` 加入 **Redirect URLs**（并将其设为 Site URL 或保留为允许的回调地址）。应用注册和重发确认邮件时会使用当前页面所在目录作为回调地址，因此生产部署地址必须在允许列表中。若本地预览，也应将实际本地地址加入允许列表。
+
+### 本地开发与验收
+
+```powershell
+npm install
+npm run check
+npm run test:browser
+```
+
+浏览器测试覆盖桌面 Chromium、手机 Chromium 与 WebKit。应用数据主要保存在 IndexedDB；localStorage 中继续保留兼容快照。
 
 ### 安全与部署提示
 
