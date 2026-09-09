@@ -1,10 +1,10 @@
 (function (root) {
   'use strict';
   const ZX = root.Zhixing = root.Zhixing || {};
-  let client, bucket, endpoint;
+  let client, bucket, endpoint, onStatus = () => {};
   const uuid = () => crypto.randomUUID();
   const safeName = name => `file.${(name.match(/\.([a-z0-9]{1,12})$/i)?.[1] || 'bin').toLowerCase()}`;
-  function configure(options) { client = options.client; bucket = options.bucket; endpoint = options.endpoint; }
+  function configure(options) { client = options.client; bucket = options.bucket; endpoint = options.endpoint; onStatus = options.onStatus || onStatus; }
   async function cacheFile(key, file) {
     try { await ZX.Database.put('blobs', { key, blob: file }); }
     catch {
@@ -73,12 +73,14 @@
       const section = mutation.data.ownerType === 'preparations' ? 'preparations' : 'course-progress';
       const path = `${user.id}/${mutation.studentId}/${section}/${mutation.data.ownerId}/${uuid()}-${safeName(mutation.data.name)}`;
       const source = cached.blob || (cached.buffer ? new Blob([cached.buffer], { type: cached.type || mutation.data.type }) : await (await fetch(cached.dataUrl)).blob());
-      await upload(source, path, session.access_token);
+      onStatus(`正在继续上传 ${mutation.data.name}（0%）`);
+      await upload(source, path, session.access_token, percent => onStatus(`正在继续上传 ${mutation.data.name}（${percent}%）`));
       mutation = { ...mutation, data: { ...mutation.data, path, pending: false } };
       delete mutation.data.localBlobKey;
       await ZX.Database.remove('blobs', cached.key);
       await ZX.Database.applyServerRecord({ ...mutation, version: mutation.baseVersion, deletedAt: null });
       await ZX.Database.put('outbox', mutation);
+      onStatus(`${mutation.data.name} 已上传，正在同步附件记录`);
     }
     return mutation;
   }

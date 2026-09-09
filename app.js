@@ -4,7 +4,7 @@ const $ = s => document.querySelector(s);
 const cloudKey = 'zhixing-tutor-cloud-v1';
 const supabaseUrl='https://nnnxsjqbklnykshqgntt.supabase.co',supabaseKey='sb_publishable_SaQQauIlc5EJqG7IhKWQFw_mYctgZiR',storageBucket='tutor-files',storageEndpoint=`${supabaseUrl}/storage/v1/upload/resumable`;
 const supabaseClient = window.supabase?.createClient(supabaseUrl,supabaseKey);
-window.Zhixing.Files.configure({client:supabaseClient,bucket:storageBucket,endpoint:storageEndpoint});
+window.Zhixing.Files.configure({client:supabaseClient,bucket:storageBucket,endpoint:storageEndpoint,onStatus:message=>{setDataMessage(message);renderSyncStatus()}});
 let cloud = JSON.parse(localStorage.getItem(cloudKey) || '{"auto":true,"lastSync":null,"userEmail":""}');
 let authRegister = false;
 let autoSyncTimer;
@@ -24,7 +24,6 @@ const isDirty=form=>snapshotForm(form)!==(form.dataset.cleanSnapshot||'[]')||[..
 function ask(message,{title='请确认',danger=false}={}){return new Promise(resolve=>{const dialog=$('#confirmDialog');$('#confirmTitle').textContent=title;$('#confirmMessage').textContent=message;$('#confirmAccept').className=danger?'primary-btn danger-confirm':'primary-btn';dialog.returnValue='cancel';dialog.onclose=()=>resolve(dialog.returnValue==='confirm');dialog.showModal()})}
 async function closeFormDialog(dialog,form,message){if(isDirty(form)&&!await ask(message))return;dialog.close('cancel')}
 function downloadStoredFile(file){return async()=>{try{let href=file.data;if(file.path){const {data,error}=await supabaseClient.storage.from(storageBucket).createSignedUrl(file.path,300,{download:file.name});if(error)throw error;href=data.signedUrl}if(!href)throw new Error('这是旧版本记录的附件名称，请重新添加文件');const link=document.createElement('a');link.href=href;link.download=file.name;link.click();}catch(err){alert(`下载失败：${err.message}`)}}}
-async function removeCloudFiles(files){const paths=(files||[]).map(file=>file.path).filter(Boolean);if(!paths.length||!navigator.onLine)return;const {data:{session}}=await supabaseClient.auth.getSession();if(!session)return;const {error}=await supabaseClient.storage.from(storageBucket).remove(paths);if(error)throw error}
 function fileTypeLabel(file){if(file.pending)return '待上传';const ext=(file.name.split('.').pop()||'').toUpperCase();return ['PDF','DOC','DOCX','PPT','PPTX','XLS','XLSX','TXT','MD','PNG','JPG','JPEG','WEBP'].includes(ext)?(ext==='JPEG'?'JPG':ext||'文件'):'文件'}function attachmentMarkup(file,itemIndex,fileIndex,kind){const isCourse=kind==='course',name=file.relativePath||file.name;return `<span class="attachment${file.pending?' pending':''}"><button class="prep-file ${isCourse?'course-file':''}" data-i="${itemIndex}" data-file="${fileIndex}" type="button" ${file.pending?'disabled':''} title="${file.pending?'联网后自动上传':`下载 ${esc(name)}`}"><svg class="attachment-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2.8h8l4 4v14.4H6zM14 2.8v4.5h4"/></svg><span class="attachment-name">${esc(name)}</span><small>${fileTypeLabel(file)}</small></button><button class="remove-attachment ${isCourse?'course-attachment':'prep-attachment'}" data-i="${itemIndex}" data-file="${fileIndex}" type="button" aria-label="删除文件 ${esc(name)}">×</button></span>`}
 function isTextFile(file){return /^text\//.test(file.type)||/\.(txt|md|markdown)$/i.test(file.name)}
 

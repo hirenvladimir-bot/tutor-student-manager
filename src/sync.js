@@ -8,6 +8,7 @@
   let onState = () => {};
   let onStatus = () => {};
   let running = false;
+  let retryCount = 0;
 
   const camel = {
     students: row => ({ name: row.name || '', school: row.school || '', targetSchool: row.target_school || '', currentScore: row.current_score, targetScore: row.target_score, nextLesson: row.next_lesson || '', focusContent: row.focus_content || '' }),
@@ -57,10 +58,12 @@
       for (const item of data?.applied || []) await ZX.Database.markApplied(item.key, item.version, item.updated_at);
       await ZX.Files.afterApplied(data?.applied || [], queued);
       for (const conflict of data?.conflicts || []) await ZX.Database.saveConflict({ ...conflict, local: queued.find(x => x.key === conflict.key) });
+      retryCount = 0; clearTimeout(sync.retryTimer);
       onStatus('online');
     } catch (error) {
       for (const item of queued) await ZX.Database.put('outbox', { ...item, attempts: (item.attempts || 0) + 1, lastError: error.message, lastAttemptAt: new Date().toISOString() });
       onStatus('error', error);
+      if (online()) { clearTimeout(sync.retryTimer); const delay = Math.min(60000, 5000 * (2 ** Math.min(retryCount++, 3))); sync.retryTimer = setTimeout(sync, delay); }
       throw error;
     } finally { running = false; }
   }
@@ -94,10 +97,11 @@
     await ZX.Database.queueNewRecords();
     await pull();
     await flush();
+    await ZX.Files.processCleanup();
     await subscribe();
     return true;
   }
-  async function stop() { if (channel && client) await client.removeChannel(channel); channel = null; userId = null; }
+  async function stop() { if (channel && client) await client.removeChannel(channel); clearTimeout(sync.retryTimer); retryCount = 0; channel = null; userId = null; }
   async function resolve(key, choice) {
     const conflict = await ZX.Database.get('conflicts', key);
     if (choice === 'cloud') await ZX.Files.discardConflict(conflict);

@@ -5,11 +5,11 @@ const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
 const { IDBFactory } = require('fake-indexeddb');
 
-function loadDevice() {
+function loadDevice(timers = {}) {
   const indexedDB = new IDBFactory();
   const window = { crypto: webcrypto, indexedDB, navigator: { onLine: true }, addEventListener() {} };
   window.window = window;
-  const context = { window, crypto: webcrypto, indexedDB, navigator: window.navigator, structuredClone, console, Blob, fetch, setTimeout, clearTimeout };
+  const context = { window, crypto: webcrypto, indexedDB, navigator: window.navigator, structuredClone, console, Blob, fetch, setTimeout: timers.setTimeout || setTimeout, clearTimeout: timers.clearTimeout || clearTimeout };
   for (const file of ['src/model.js', 'src/database.js', 'src/files.js', 'src/sync.js']) vm.runInNewContext(fs.readFileSync(file, 'utf8'), context);
   return window.Zhixing;
 }
@@ -91,4 +91,22 @@ test('two devices merge different records and preserve both versions of a same-r
   assert.equal(conflicts[0].local.data.name, '设备 B 版本');
   assert.equal(conflicts[0].cloud.data.name, '设备 A 版本');
   assert.equal((await B.Database.state()).students.find(item => item.id === firstId).name, '设备 B 版本');
+});
+
+test('failed online synchronization schedules an automatic retry', async () => {
+  const scheduled = [];
+  const ZX = loadDevice({ setTimeout: (callback, delay) => { scheduled.push({ callback, delay }); return scheduled.length; }, clearTimeout() {} });
+  const cloud = mockCloud('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+  await startDevice(ZX, cloud.client, { students: [], activeId: null });
+  const state = await ZX.Database.state();
+  state.students.push({ id: '44444444-4444-4444-8444-444444444444', name: '等待重试', scores: [], custom: [], preparations: [], courseProgress: [] });
+  state.activeId = state.students[0].id;
+  await ZX.Database.persist(state);
+  const originalRpc = cloud.client.rpc;
+  cloud.client.rpc = async (name, args) => name === 'apply_tutor_mutations' ? { data: null, error: new Error('temporary network failure') } : originalRpc(name, args);
+
+  await assert.rejects(ZX.Sync.flush(), /temporary network failure/);
+  assert.equal(scheduled.length, 1);
+  assert.equal(scheduled[0].delay, 5000);
+  assert.equal((await ZX.Database.all('outbox'))[0].attempts, 1);
 });
