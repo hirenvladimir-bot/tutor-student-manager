@@ -69,6 +69,10 @@ test('offline attachment is queued without losing preparation text', async ({ pa
   await expect(page.locator('#prepList')).toContainText('待上传');
   await page.locator('#sidebarAuthButton').click();
   await expect(page.locator('#uploadQueue')).toContainText('讲义.pdf');
+  await page.locator('.cancel-upload').click();
+  await expect(page.locator('#uploadQueue')).toBeHidden();
+  await expect(page.locator('#prepList')).not.toContainText('讲义.pdf');
+  expect(await page.evaluate(() => Zhixing.Database.all('blobs').then(items => items.length))).toBe(0);
 });
 
 test('Markdown backup round-trip preserves preparations, attachments and free-form scores', async ({ page }) => {
