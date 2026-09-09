@@ -9,6 +9,91 @@ test.beforeEach(async ({ page }) => {
   await page.reload();
 });
 
+test('two browser contexts preserve offline edits, conflicts and deletions', async ({ browser }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chromium', 'cross-device behavior only needs one browser engine');
+  const userId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const firstId = '11111111-1111-4111-8111-111111111111';
+  const secondId = '22222222-2222-4222-8222-222222222222';
+  const rows = new Map();
+  let mutationCalls = 0;
+  const now = () => new Date().toISOString();
+  const record = row => ({
+    key: `students:${row.id}`, entity: 'students', id: row.id, studentId: null,
+    data: { name: row.name, school: row.school, targetSchool: row.target_school, currentScore: row.current_score, targetScore: row.target_score, nextLesson: row.next_lesson, focusContent: row.focus_content },
+    version: row.version, deletedAt: row.deleted_at, updatedAt: row.updated_at
+  });
+  const cloudCall = async request => {
+    if (request.kind === 'migrate') return { data: { status: 'already_migrated' }, error: null };
+    if (request.kind === 'select') return { data: request.table === 'students' ? [...rows.values()].map(value => structuredClone(value)) : [], error: null };
+    if (request.kind === 'snapshot') return { error: null };
+    mutationCalls++;
+    const applied = [], conflicts = [];
+    for (const mutation of request.mutations) {
+      const key = `students:${mutation.id}`, current = rows.get(key), base = Number(mutation.base_version || 0);
+      if ((current?.version || 0) !== base) { conflicts.push({ key, entity: 'students', id: mutation.id, cloud: record(current) }); continue; }
+      const data = mutation.data || {}, version = base + 1;
+      rows.set(key, { id: mutation.id, user_id: userId, name: data.name || '', school: data.school || '', target_school: data.targetSchool || '', current_score: data.currentScore ?? null, target_score: data.targetScore ?? null, next_lesson: data.nextLesson || '', focus_content: data.focusContent || '', version, deleted_at: mutation.operation === 'delete' ? now() : null, updated_at: now() });
+      applied.push({ key, version, updated_at: now() });
+    }
+    return { data: { applied, conflicts }, error: null };
+  };
+  const contexts = [await browser.newContext(), await browser.newContext()];
+  try {
+    for (const context of contexts) await context.exposeFunction('__zxCloudCall', cloudCall);
+    const pages = await Promise.all(contexts.map(context => context.newPage()));
+    await Promise.all(pages.map(page => page.goto(pageUrl)));
+    const install = async (page, initial) => page.evaluate(async ({ initial, userId }) => {
+      await window.Zhixing.Sync.stop();
+      await window.Zhixing.Database.wipe();
+      const call = window.__zxCloudCall;
+      const client = {
+        auth: { getUser: async () => ({ data: { user: { id: userId } } }) },
+        rpc: (name, args) => name === 'migrate_legacy_tutor_profile' ? call({ kind: 'migrate' }) : call({ kind: 'mutate', mutations: args.p_mutations }),
+        from: table => ({ select: () => ({ eq: () => call({ kind: 'select', table }) }), upsert: () => call({ kind: 'snapshot' }) }),
+        channel: () => { const channel = { on: () => channel, subscribe: callback => { callback('SUBSCRIBED'); return channel; } }; return channel; },
+        removeChannel: async () => {}, storage: { from: () => ({ remove: async () => ({ error: null }) }) }
+      };
+      window.__zxClient = client;
+      await window.Zhixing.Database.start(initial);
+      window.Zhixing.Files.configure({ client, bucket: 'tutor-files', endpoint: 'unused' });
+      await window.Zhixing.Sync.start({ client, onState: next => { window.__zxState = next; } });
+    }, { initial, userId });
+    const emptyStudent = id => ({ id, name: id === firstId ? '学生一' : '学生二', school: '', targetSchool: '', currentScore: null, targetScore: null, nextLesson: '', focusContent: '', scores: [], custom: [], preparations: [], courseProgress: [] });
+    await install(pages[0], { activeId: firstId, students: [emptyStudent(firstId), emptyStudent(secondId)] });
+    await install(pages[1], { activeId: null, students: [] });
+    expect(await pages[1].evaluate(() => window.Zhixing.Database.state().then(state => state.students.length))).toBe(2);
+
+    await pages[0].evaluate(async id => { const state = await window.Zhixing.Database.state(); state.students.find(item => item.id === id).school = '设备 A 学校'; await window.Zhixing.Database.persist(state); await window.Zhixing.Sync.flush(); }, firstId);
+    await pages[1].evaluate(async id => { const state = await window.Zhixing.Database.state(); state.students.find(item => item.id === id).targetSchool = '设备 B 目标'; await window.Zhixing.Database.persist(state); await window.Zhixing.Sync.flush(); }, secondId);
+    await Promise.all(pages.map(page => page.evaluate(() => window.Zhixing.Sync.pull())));
+    for (const page of pages) expect(await page.evaluate(([a, b]) => window.Zhixing.Database.state().then(state => [state.students.find(item => item.id === a).school, state.students.find(item => item.id === b).targetSchool]), [firstId, secondId])).toEqual(['设备 A 学校', '设备 B 目标']);
+
+    await pages[0].evaluate(async id => { const state = await window.Zhixing.Database.state(); state.students.find(item => item.id === id).name = '设备 A 版本'; await window.Zhixing.Database.persist(state); }, firstId);
+    await pages[1].evaluate(async id => { const state = await window.Zhixing.Database.state(); state.students.find(item => item.id === id).name = '设备 B 版本'; await window.Zhixing.Database.persist(state); }, firstId);
+    await pages[0].evaluate(() => window.Zhixing.Sync.flush());
+    await pages[1].evaluate(() => window.Zhixing.Sync.flush());
+    expect(await pages[1].evaluate(() => window.Zhixing.Database.all('conflicts').then(items => [items[0].local.data.name, items[0].cloud.data.name]))).toEqual(['设备 B 版本', '设备 A 版本']);
+    const callsAtConflict = mutationCalls;
+    await pages[1].evaluate(() => window.Zhixing.Sync.flush());
+    expect(mutationCalls).toBe(callsAtConflict);
+    await pages[1].evaluate(id => window.Zhixing.Sync.resolve(`students:${id}`, 'cloud'), firstId);
+
+    await pages[1].evaluate(async id => { Object.defineProperty(navigator, 'onLine', { value: false, configurable: true }); const state = await window.Zhixing.Database.state(); state.students.find(item => item.id === id).targetSchool = '离线目标'; await window.Zhixing.Database.persist(state); await window.Zhixing.Sync.flush(); }, firstId);
+    const callsWhileOffline = mutationCalls;
+    expect(await pages[1].evaluate(() => window.Zhixing.Database.all('outbox').then(items => items.length))).toBe(1);
+    expect(mutationCalls).toBe(callsWhileOffline);
+    await pages[1].evaluate(async () => { Object.defineProperty(navigator, 'onLine', { value: true, configurable: true }); await window.Zhixing.Sync.flush(); });
+    await pages[0].evaluate(() => window.Zhixing.Sync.pull());
+    expect(await pages[0].evaluate(id => window.Zhixing.Database.state().then(state => state.students.find(item => item.id === id).targetSchool), firstId)).toBe('离线目标');
+
+    await pages[1].evaluate(async id => { const state = await window.Zhixing.Database.state(); state.students = state.students.filter(item => item.id !== id); await window.Zhixing.Database.persist(state); await window.Zhixing.Sync.flush(); }, secondId);
+    await pages[0].evaluate(() => window.Zhixing.Sync.pull());
+    expect(await pages[0].evaluate(() => window.Zhixing.Database.state().then(state => state.students.map(item => item.name)))).toEqual(['设备 A 版本']);
+  } finally {
+    await Promise.all(contexts.map(context => context.close()));
+  }
+});
+
 test('blank student form closes without native validation', async ({ page }) => {
   await page.getByRole('button', { name: '添加第一位学生' }).click();
   await expect(page.locator('#studentDialog')).toHaveAttribute('open', '');
