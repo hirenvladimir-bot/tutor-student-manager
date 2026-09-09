@@ -43,7 +43,7 @@ function render(){
   document.querySelectorAll('.course-file').forEach(b=>downloadStoredFile(course[+b.dataset.i].files[+b.dataset.file]));
   const preparations=s.preparations||[];$('#prepList').innerHTML=preparations.map((item,i)=>`<article class="prep-item"><div class="prep-item-head"><div><h3>${esc(item.title)}</h3><time>${esc(item.date)}</time></div><div class="item-actions"><button class="edit-prep" data-i="${i}" type="button">编辑</button><button class="remove-prep" data-i="${i}" type="button" aria-label="删除这次备课">×</button></div></div>${item.content?`<p>${esc(item.content).replace(/\n/g,'<br>')}</p>`:''}${item.files?.length?`<div class="prep-files">${item.files.map((file,j)=>`<button class="prep-file" data-i="${i}" data-file="${j}" type="button" title="下载 ${esc(file.name)}">⌁ ${esc(file.name)}</button>`).join('')}</div>`:''}</article>`).join('')||'<p class="course-empty">还没有备课条目。点击“添加备课”开始记录。</p>';
   document.querySelectorAll('.remove-prep').forEach(b=>b.onclick=()=>{if(confirm('删除这次备课吗？')){preparations.splice(+b.dataset.i,1);s.preparations=preparations;save();render();}});
-  document.querySelectorAll('.edit-prep').forEach(b=>openPrepEditor(+b.dataset.i));
+  document.querySelectorAll('.edit-prep').forEach(b=>b.onclick=()=>openPrepEditor(+b.dataset.i));
   document.querySelectorAll('.prep-file:not(.course-file)').forEach(b=>b.onclick=downloadStoredFile(preparations[+b.dataset.i].files[+b.dataset.file]));
   $('#noScores').style.display=scores.length?'none':'grid'; drawChart(scores);
 }
