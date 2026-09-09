@@ -5,7 +5,7 @@
   const clone = value => JSON.parse(JSON.stringify(value));
   const uuid = () => root.crypto?.randomUUID?.() || `zx-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const own = (obj, keys) => Object.fromEntries(keys.map(k => [k, obj?.[k] ?? (k.endsWith('Score') ? null : '')]));
-  const attachmentData = (file, ownerType, ownerId) => ({ ownerType, ownerId, name: file.name || '未命名文件', relativePath: file.relativePath || '', type: file.type || 'application/octet-stream', size: Number(file.size || 0), path: file.path || '', data: file.data || '', pending: Boolean(file.pending), localBlobKey: file.localBlobKey || '' });
+  const attachmentData = (file, ownerType, ownerId) => ({ ownerType, ownerId, name: file.name || '未命名文件', relativePath: file.relativePath || '', type: file.type || 'application/octet-stream', size: Number(file.size || 0), path: file.path || '', uploadPath: file.uploadPath || '', data: file.data || '', pending: Boolean(file.pending), localBlobKey: file.localBlobKey || '' });
 
   function ensureIds(state) {
     const next = clone(state || { students: [], activeId: null });

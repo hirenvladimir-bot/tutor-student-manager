@@ -23,7 +23,7 @@
   function decode(entity, row) {
     return { key: `${entity}:${row.id}`, entity, id: row.id, studentId: row.student_id || null, data: camel[entity](row), version: Number(row.version || 0), deletedAt: row.deleted_at || null, updatedAt: row.updated_at };
   }
-  function comparable(data) { const value = { ...(data || {}) }; delete value.pending; delete value.localBlobKey; return JSON.stringify(Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]))); }
+  function comparable(data) { const value = { ...(data || {}) }; delete value.pending; delete value.localBlobKey; delete value.uploadPath; return JSON.stringify(Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]))); }
   function online() { return navigator.onLine !== false; }
   async function currentUser() { return (await client.auth.getUser()).data.user; }
 
@@ -60,10 +60,14 @@
       for (const item of queued) {
         try { ready.push(await ZX.Files.beforeSync(item)); }
         catch (error) {
-          uploadErrors.push(error);
-          await ZX.Database.put('outbox', { ...item, attempts: (item.attempts || 0) + 1, lastError: error.message || String(error), lastAttemptAt: new Date().toISOString() });
+          if (error?.code !== 'UPLOAD_CANCELLED') {
+            uploadErrors.push(error);
+            const latest = await ZX.Database.get('outbox', item.key) || item;
+            await ZX.Database.put('outbox', { ...latest, attempts: (latest.attempts || 0) + 1, lastError: error.message || String(error), lastAttemptAt: new Date().toISOString() });
+          }
         }
       }
+      if (ready.length) onState(await ZX.Database.state());
       if (ready.length) {
         const payload = ready.map(item => ({ entity: item.entity, id: item.id, student_id: item.studentId, base_version: item.baseVersion, operation: item.operation, data: item.data, deleted_at: item.deletedAt }));
         const { data, error } = await client.rpc('apply_tutor_mutations', { p_mutations: payload });
@@ -85,9 +89,9 @@
   }
 
   async function sync() {
-    if (!userId || !online()) { onStatus('offline'); return; }
-    try { await flush(); await pull(); await writeLegacySnapshot(); onStatus('online'); const retryable=(await ZX.Database.all('outbox')).some(item=>(item.attempts||0)<MAX_ATTEMPTS);if(retryable){clearTimeout(schedule.timer);schedule.timer=setTimeout(sync,1200);} }
-    catch (error) { onStatus('error', error); }
+    if (!userId || !online()) { onStatus('offline'); return false; }
+    try { await flush(); await pull(); await writeLegacySnapshot(); onStatus('online'); const retryable=(await ZX.Database.all('outbox')).some(item=>(item.attempts||0)<MAX_ATTEMPTS);if(retryable){clearTimeout(schedule.timer);schedule.timer=setTimeout(sync,1200);} return true; }
+    catch (error) { onStatus('error', error); return false; }
   }
   async function migrateLegacy() {
     if (!client || !userId) return;

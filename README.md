@@ -12,7 +12,7 @@
 
 ## 备份与联网同步
 
-右上角的“本地保存／同步”入口提供两种方式：
+左下角的“数据中心”入口统一管理本地备份、账号登录／退出和云端同步：
 
 - **导出 JSON**：下载包含全部学生档案的完整备份文件。
 - **导出 Markdown／文字**：将学生资料、成绩、课程轨迹、备忘和自定义信息导出为易阅读、易编辑的 `.md` 或 `.txt` 文件。
@@ -24,7 +24,7 @@
 ### Supabase 配置与实时同步
 
 1. 首次配置仍运行 [supabase-schema.sql](./supabase-schema.sql) 和 [supabase-realtime.sql](./supabase-realtime.sql)。
-2. 升级稳定重构版时，再运行 [supabase-schema-v2.sql](./supabase-schema-v2.sql)。脚本可重复执行，不删除旧表，并会在首次登录迁移时把旧 JSON 保存到 `tutor_profile_backups`。
+2. 升级稳定重构版时，再运行 [supabase-schema-v2.sql](./supabase-schema-v2.sql)。脚本可重复执行，不删除旧表；它会创建私有 `tutor-files` 存储桶和按账号目录隔离的 Storage 策略，并在首次登录迁移时把旧 JSON 保存到 `tutor_profile_backups`。
 3. 新版使用 `apply_tutor_mutations` 对每条记录执行乐观版本检查；不同记录可自动合并，同一记录的冲突会保留在数据中心供选择。
 4. 在 Supabase Authentication 中启用 Email 登录，并按需要启用邮箱确认。注册时，应用会发送确认邮件；确认后请返回页面登录。
 5. 在 Authentication 的 URL Configuration 中，将 GitHub Pages 地址 `https://hirenvladimir-bot.github.io/tutor-student-manager/` 加入 **Redirect URLs**（并将其设为 Site URL 或保留为允许的回调地址）。应用注册和重发确认邮件时会使用当前页面所在目录作为回调地址，因此生产部署地址必须在允许列表中。若本地预览，也应将实际本地地址加入允许列表。
@@ -38,6 +38,8 @@ npm run test:browser
 ```
 
 浏览器测试覆盖桌面 Chromium、手机 Chromium 与 WebKit。应用数据主要保存在 IndexedDB；localStorage 中继续保留兼容快照。
+
+附件会先写入 IndexedDB，再由后台队列通过 TUS 分片上传；关闭页面或临时断网后可继续。数据中心可以查看失败原因、重试失败项或取消待上传附件。网站使用 `https://<project-id>.storage.supabase.co/storage/v1/upload/resumable` 专用上传域名。
 
 ### 安全与部署提示
 

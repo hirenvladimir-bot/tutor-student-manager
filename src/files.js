@@ -2,6 +2,7 @@
   'use strict';
   const ZX = root.Zhixing = root.Zhixing || {};
   let client, bucket, endpoint, onStatus = () => {};
+  const activeUploads = new Map();
   const uuid = () => crypto.randomUUID();
   const safeName = name => `file.${(name.match(/\.([a-z0-9]{1,12})$/i)?.[1] || 'bin').toLowerCase()}`;
   function configure(options) { client = options.client; bucket = options.bucket; endpoint = options.endpoint; onStatus = options.onStatus || onStatus; }
@@ -12,12 +13,20 @@
       catch { const dataUrl = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); }); await ZX.Database.put('blobs', { key, dataUrl, type: file.type, name: file.name, lastModified: file.lastModified }); }
     }
   }
-  async function upload(file, path, token, progress = () => {}) {
+  async function upload(file, path, token, progress = () => {}, key = path) {
     if (!root.tus?.Upload) throw new Error('上传组件未加载');
     return new Promise((resolve, reject) => {
-      const task = new root.tus.Upload(file, { endpoint, retryDelays: [0, 3000, 5000, 10000, 20000], headers: { authorization: `Bearer ${token}`, 'x-upsert': 'true' }, uploadDataDuringCreation: true, removeFingerprintOnSuccess: true, fingerprint: () => `${bucket}/${path}/${file.name}/${file.size}/${file.lastModified}`, metadata: { bucketName: bucket, objectName: path, contentType: file.type || 'application/octet-stream', cacheControl: '3600' }, chunkSize: 6 * 1024 * 1024, onError: reject, onProgress: (done, total) => progress(Math.round(done / total * 100)), onSuccess: resolve });
-      task.findPreviousUploads().then(found => { if (found.length) task.resumeFromPreviousUpload(found[0]); task.start(); }).catch(reject);
+      let settled = false;
+      const finish = (callback, value) => { if (settled) return; settled = true; activeUploads.delete(key); callback(value); };
+      const task = new root.tus.Upload(file, { endpoint, retryDelays: [0, 3000, 5000, 10000, 20000], headers: { authorization: `Bearer ${token}`, 'x-upsert': 'true' }, uploadDataDuringCreation: true, removeFingerprintOnSuccess: true, fingerprint: () => `${bucket}/${path}/${file.name || 'blob'}/${file.size}/${file.lastModified || 0}`, metadata: { bucketName: bucket, objectName: path, contentType: file.type || 'application/octet-stream', cacheControl: '3600' }, chunkSize: 6 * 1024 * 1024, onError: error => finish(reject, error), onProgress: (done, total) => progress(Math.round(done / total * 100)), onSuccess: () => finish(resolve) });
+      activeUploads.set(key, { task, cancel: async () => { const error = new Error('上传已取消'); error.code = 'UPLOAD_CANCELLED'; finish(reject, error); try { await task.abort(true); } catch {} } });
+      task.findPreviousUploads().then(found => { if (found.length) task.resumeFromPreviousUpload(found[0]); task.start(); }).catch(error => finish(reject, error));
     });
+  }
+  async function cancel(key) { const active = activeUploads.get(key); if (!active) return false; await active.cancel(); return true; }
+  async function clearLocal() {
+    await Promise.all([...activeUploads.values()].map(active => active.cancel().catch(() => {})));
+    if (root.localStorage) for (let index = root.localStorage.length - 1; index >= 0; index--) { const key = root.localStorage.key(index); if (key?.startsWith('tus::')) root.localStorage.removeItem(key); }
   }
   async function queueCleanup(path) {
     if (!path) return;
@@ -39,21 +48,12 @@
   }
   async function prepare(files, section, recordId, studentId, status = () => {}) {
     const list = [...files];
-    let session = null, user = null;
-    try { session = (await client?.auth.getSession()).data?.session || null; if (session) user = (await client.auth.getUser()).data?.user || session.user || null; } catch { session = null; user = null; }
     const result = [];
     for (let index = 0; index < list.length; index++) {
       const file = list[index], id = uuid(), relativePath = file.webkitRelativePath || '', localBlobKey = `blob:${id}`;
       const item = { id, name: file.name, relativePath, type: file.type || 'application/octet-stream', size: file.size, path: '', pending: true, localBlobKey };
-      if (session && user && navigator.onLine) {
-        const path = `${user.id}/${studentId}/${section}/${recordId}/${uuid()}-${safeName(file.name)}`;
-        status(`正在上传 ${index + 1}/${list.length}：${file.name}（0%）`);
-        try { await upload(file, path, session.access_token, percent => status(`正在上传 ${index + 1}/${list.length}：${file.name}（${percent}%）`)); item.path = path; item.pending = false; delete item.localBlobKey; }
-        catch (error) { await cacheFile(localBlobKey, file); status(`${file.name} 已进入待上传队列`); }
-      } else {
-        try { await cacheFile(localBlobKey, file); status(`${file.name} 已保存到本机，联网后自动上传`); }
-        catch (error) { throw new Error(`无法暂存 ${file.name}：${error.message || error.name || '浏览器存储不可用'}`); }
-      }
+      try { await cacheFile(localBlobKey, file); status(`已安全保存 ${index + 1}/${list.length}：${file.name}，后台将自动上传`); }
+      catch (error) { throw new Error(`无法暂存 ${file.name}：${error.message || error.name || '浏览器存储空间不足'}`); }
       result.push(item);
     }
     return result;
@@ -71,12 +71,18 @@
       const user = (await client.auth.getUser()).data.user;
       if (!session || !user) throw new Error('需要登录后才能继续上传文件');
       const section = mutation.data.ownerType === 'preparations' ? 'preparations' : 'course-progress';
-      const path = `${user.id}/${mutation.studentId}/${section}/${mutation.data.ownerId}/${uuid()}-${safeName(mutation.data.name)}`;
+      const path = mutation.data.uploadPath || `${user.id}/${mutation.studentId}/${section}/${mutation.data.ownerId}/${uuid()}-${safeName(mutation.data.name)}`;
+      if (!mutation.data.uploadPath) {
+        mutation = { ...mutation, data: { ...mutation.data, uploadPath: path } };
+        await ZX.Database.applyServerRecord({ ...mutation, version: mutation.baseVersion, deletedAt: null });
+        await ZX.Database.put('outbox', mutation);
+      }
       const source = cached.blob || (cached.buffer ? new Blob([cached.buffer], { type: cached.type || mutation.data.type }) : await (await fetch(cached.dataUrl)).blob());
       onStatus(`正在继续上传 ${mutation.data.name}（0%）`);
-      await upload(source, path, session.access_token, percent => onStatus(`正在继续上传 ${mutation.data.name}（${percent}%）`));
+      await upload(source, path, session.access_token, percent => onStatus(`正在继续上传 ${mutation.data.name}（${percent}%）`), mutation.key);
       mutation = { ...mutation, data: { ...mutation.data, path, pending: false } };
       delete mutation.data.localBlobKey;
+      delete mutation.data.uploadPath;
       await ZX.Database.remove('blobs', cached.key);
       await ZX.Database.applyServerRecord({ ...mutation, version: mutation.baseVersion, deletedAt: null });
       await ZX.Database.put('outbox', mutation);
@@ -97,5 +103,5 @@
     if (local.data?.localBlobKey) await ZX.Database.remove('blobs', local.data.localBlobKey);
     if (local.data?.path && local.data.path !== conflict.cloud?.data?.path) await queueCleanup(local.data.path);
   }
-  ZX.Files = { configure, prepare, beforeSync, afterApplied, queueCleanup, processCleanup, discardConflict };
+  ZX.Files = { configure, prepare, beforeSync, afterApplied, queueCleanup, processCleanup, discardConflict, cancel, clearLocal };
 })(window);

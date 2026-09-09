@@ -41,6 +41,13 @@ test('legacy data-url attachments survive v2 normalization', () => {
   assert.equal(restored.students[0].preparations[0].files[0].data, 'data:text/plain;base64,5YaF5a65');
 });
 
+test('pending attachment upload paths survive local model round-trips', () => {
+  const original = fixture();
+  Object.assign(original.students[0].preparations[0].files[0], { path: '', pending: true, localBlobKey: 'blob:pending', uploadPath: 'user/student/preparations/prep/file.pdf' });
+  const restored = Model.hydrate(Model.flatten(original), original.activeId);
+  assert.equal(restored.students[0].preparations[0].files[0].uploadPath, 'user/student/preparations/prep/file.pdf');
+});
+
 test('diff isolates record edits and creates tombstones for deletions', () => {
   const before = Model.flatten(fixture());
   const changed = fixture(); changed.students[0].scores[0].score = 90;

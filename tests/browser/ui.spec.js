@@ -154,6 +154,7 @@ test('logout clears all local records, pending files and cleanup work', async ({
     localStorage.setItem(cloudKey, JSON.stringify(cloud));
     await Zhixing.Database.put('blobs', { key: 'blob:test', dataUrl: 'data:text/plain;base64,QQ==' });
     await Zhixing.Database.put('cleanup', { key: 'u/test.pdf', path: 'u/test.pdf', attempts: 1 });
+    localStorage.setItem('tus::pending-upload::1', JSON.stringify({ uploadUrl: 'https://storage.invalid/upload' }));
     supabaseClient.auth.signOut = async () => ({ error: null });
     render();
   });
@@ -166,10 +167,11 @@ test('logout clears all local records, pending files and cleanup work', async ({
   await expect(page.getByRole('heading', { name: '开始建立学生档案' })).toBeVisible();
   const local = await page.evaluate(async () => ({
     profile: localStorage.getItem(storeKey),
+    tus: localStorage.getItem('tus::pending-upload::1'),
     email: JSON.parse(localStorage.getItem(cloudKey) || '{}').userEmail,
     counts: await Promise.all(['records','outbox','conflicts','blobs','cleanup','meta'].map(name => Zhixing.Database.all(name).then(items => items.length)))
   }));
-  expect(local).toEqual({ profile: null, email: '', counts: [0,0,0,0,0,0] });
+  expect(local).toEqual({ profile: null, tus: null, email: '', counts: [0,0,0,0,0,0] });
 });
 
 test('responsive layout avoids body zoom and horizontal overflow at a 200% equivalent viewport', async ({ page }) => {

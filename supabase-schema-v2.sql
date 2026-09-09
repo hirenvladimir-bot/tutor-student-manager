@@ -50,6 +50,25 @@ create table if not exists public.tutor_profile_backups (
   data jsonb not null, backed_up_at timestamptz not null default now()
 );
 
+-- 私有附件桶。对象路径必须以当前登录账号 UUID 开头：user_id/student_id/...
+insert into storage.buckets (id,name,public)
+values ('tutor-files','tutor-files',false)
+on conflict (id) do update set public=false;
+
+drop policy if exists "tutor_files_select_own" on storage.objects;
+create policy "tutor_files_select_own" on storage.objects for select to authenticated
+using (bucket_id='tutor-files' and (storage.foldername(name))[1]=auth.uid()::text);
+drop policy if exists "tutor_files_insert_own" on storage.objects;
+create policy "tutor_files_insert_own" on storage.objects for insert to authenticated
+with check (bucket_id='tutor-files' and (storage.foldername(name))[1]=auth.uid()::text);
+drop policy if exists "tutor_files_update_own" on storage.objects;
+create policy "tutor_files_update_own" on storage.objects for update to authenticated
+using (bucket_id='tutor-files' and (storage.foldername(name))[1]=auth.uid()::text)
+with check (bucket_id='tutor-files' and (storage.foldername(name))[1]=auth.uid()::text);
+drop policy if exists "tutor_files_delete_own" on storage.objects;
+create policy "tutor_files_delete_own" on storage.objects for delete to authenticated
+using (bucket_id='tutor-files' and (storage.foldername(name))[1]=auth.uid()::text);
+
 do $$ declare t text; begin
   foreach t in array array['students','scores','preparations','course_progress','custom_fields','attachments','tutor_migrations','tutor_profile_backups'] loop
     execute format('alter table public.%I enable row level security', t);

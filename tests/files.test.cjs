@@ -74,36 +74,86 @@ test('TUS upload resumes a previous fingerprint and preserves a folder path', as
     start() { this.options.onProgress(this.file.size, this.file.size); this.options.onSuccess(); }
   }
   const ZX = load({ Upload }), status = [];
-  ZX.Files.configure({ client: uploadClient(), bucket: 'tutor-files', endpoint: 'https://storage.test/upload/resumable' });
+  ZX.Files.configure({ client: uploadClient(), bucket: 'tutor-files', endpoint: 'https://storage.test/upload/resumable', onStatus: message => status.push(message) });
   const [attachment] = await ZX.Files.prepare([mockFile('讲义.pdf', '第一章/讲义.pdf')], 'preparations', 'prep-a', 'student-a', message => status.push(message));
+  const mutation = { key: `attachments:${attachment.id}`, entity: 'attachments', id: attachment.id, studentId: 'student-a', baseVersion: 0, operation: 'upsert', data: { ...attachment, ownerType: 'preparations', ownerId: 'prep-a' } };
+  const uploaded = await ZX.Files.beforeSync(mutation);
 
   assert.equal(uploads.length, 1);
   assert.equal(uploads[0].resumed.uploadUrl, 'resume-me');
   assert.equal(uploads[0].options.chunkSize, 6 * 1024 * 1024);
   assert.equal(uploads[0].options.metadata.bucketName, 'tutor-files');
   assert.match(uploads[0].options.metadata.objectName, /^user-a\/student-a\/preparations\/prep-a\/.+-file\.pdf$/);
-  assert.equal(attachment.relativePath, '第一章/讲义.pdf');
-  assert.equal(attachment.pending, false);
-  assert.match(status.at(-1), /100%/);
+  assert.equal(uploaded.data.relativePath, '第一章/讲义.pdf');
+  assert.equal(uploaded.data.pending, false);
+  assert.equal(uploaded.data.localBlobKey, undefined);
+  assert.ok(status.some(message => /100%/.test(message)));
 });
 
 test('a partial upload failure keeps successful paths and queues only failed files locally', async () => {
+  let uploadIndex = 0;
   class Upload {
-    constructor(file, options) { this.file = file; this.options = options; }
+    constructor(file, options) { this.file = file; this.options = options; this.index = uploadIndex++; }
     async findPreviousUploads() { return []; }
-    start() { if (this.file.name === '失败.pdf') this.options.onError(new Error('network interrupted')); else { this.options.onProgress(this.file.size, this.file.size); this.options.onSuccess(); } }
+    start() { if (this.index === 1) this.options.onError(new Error('network interrupted')); else { this.options.onProgress(this.file.size, this.file.size); this.options.onSuccess(); } }
   }
   const ZX = load({ Upload });
   ZX.Files.configure({ client: uploadClient(), bucket: 'tutor-files', endpoint: 'https://storage.test/upload/resumable' });
   const attachments = await ZX.Files.prepare([mockFile('成功.pdf'), mockFile('失败.pdf')], 'course-progress', 'course-a', 'student-a');
+  const mutations = attachments.map(attachment => ({ key: `attachments:${attachment.id}`, entity: 'attachments', id: attachment.id, studentId: 'student-a', baseVersion: 0, operation: 'upsert', data: { ...attachment, ownerType: 'course_progress', ownerId: 'course-a' } }));
+  const first = await ZX.Files.beforeSync(mutations[0]);
+  await assert.rejects(ZX.Files.beforeSync(mutations[1]), /network interrupted/);
 
   assert.equal(attachments.length, 2);
-  assert.equal(attachments[0].pending, false);
-  assert.match(attachments[0].path, /^user-a\/student-a\/course-progress\/course-a\//);
+  assert.equal(first.data.pending, false);
+  assert.match(first.data.path, /^user-a\/student-a\/course-progress\/course-a\//);
   assert.equal(attachments[1].pending, true);
   assert.equal(attachments[1].path, '');
   assert.ok(attachments[1].localBlobKey);
   const cached = await ZX.Database.all('blobs');
   assert.equal(cached.length, 1);
   assert.equal(cached[0].name, '失败.pdf');
+});
+
+test('cancelling an active TUS task aborts the request and rejects with a distinct cancellation code', async () => {
+  let aborted = false;
+  let uploadCreated;
+  const created = new Promise(resolve => { uploadCreated = resolve; });
+  class Upload {
+    constructor(file, options) { this.file = file; this.options = options; uploadCreated(); }
+    async findPreviousUploads() { return []; }
+    start() {}
+    async abort() { aborted = true; }
+  }
+  const ZX = load({ Upload });
+  ZX.Files.configure({ client: uploadClient(), bucket: 'tutor-files', endpoint: 'https://storage.test/upload/resumable' });
+  const [attachment] = await ZX.Files.prepare([mockFile('取消.pdf')], 'preparations', 'prep-cancel', 'student-a');
+  const mutation = { key: `attachments:${attachment.id}`, entity: 'attachments', id: attachment.id, studentId: 'student-a', baseVersion: 0, operation: 'upsert', data: { ...attachment, ownerType: 'preparations', ownerId: 'prep-cancel' } };
+  const pending = ZX.Files.beforeSync(mutation);
+  await created;
+  assert.equal(await ZX.Files.cancel(mutation.key), true);
+  await assert.rejects(pending, error => error.code === 'UPLOAD_CANCELLED');
+  assert.equal(aborted, true);
+});
+
+test('a retry reuses the persisted upload path so TUS can resume after restart', async () => {
+  const paths = [];
+  let attempt = 0;
+  class Upload {
+    constructor(file, options) { this.file = file; this.options = options; paths.push(options.metadata.objectName); }
+    async findPreviousUploads() { return attempt ? [{ uploadUrl: 'resume-after-restart' }] : []; }
+    resumeFromPreviousUpload(previous) { this.resumed = previous; }
+    start() { if (attempt++ === 0) this.options.onError(new Error('connection lost')); else this.options.onSuccess(); }
+  }
+  const ZX = load({ Upload });
+  ZX.Files.configure({ client: uploadClient(), bucket: 'tutor-files', endpoint: 'https://storage.test/upload/resumable' });
+  const [attachment] = await ZX.Files.prepare([mockFile('断点.pdf')], 'preparations', 'prep-resume', 'student-a');
+  const mutation = { key: `attachments:${attachment.id}`, entity: 'attachments', id: attachment.id, studentId: 'student-a', baseVersion: 0, operation: 'upsert', data: { ...attachment, ownerType: 'preparations', ownerId: 'prep-resume' } };
+  await assert.rejects(ZX.Files.beforeSync(mutation), /connection lost/);
+  const persisted = await ZX.Database.get('outbox', mutation.key);
+  assert.equal(persisted.data.uploadPath, paths[0]);
+  const completed = await ZX.Files.beforeSync(persisted);
+  assert.equal(paths[1], paths[0]);
+  assert.equal(completed.data.path, paths[0]);
+  assert.equal(completed.data.uploadPath, undefined);
 });
