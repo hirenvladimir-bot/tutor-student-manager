@@ -48,8 +48,9 @@
 
   async function flush() {
     if (!client || !userId || !online() || running) return;
+    const conflictKeys = new Set((await ZX.Database.all('conflicts')).map(item => item.key));
     let queued = (await ZX.Database.all('outbox'))
-      .filter(item => (item.attempts || 0) < MAX_ATTEMPTS)
+      .filter(item => (item.attempts || 0) < MAX_ATTEMPTS && !conflictKeys.has(item.key))
       .sort((a, b) => Number(a.entity === 'attachments') - Number(b.entity === 'attachments'))
       .slice(0, BATCH_SIZE);
     if (!queued.length) return;
@@ -90,7 +91,7 @@
 
   async function sync() {
     if (!userId || !online()) { onStatus('offline'); return false; }
-    try { await flush(); await pull(); await writeLegacySnapshot(); onStatus('online'); const retryable=(await ZX.Database.all('outbox')).some(item=>(item.attempts||0)<MAX_ATTEMPTS);if(retryable){clearTimeout(schedule.timer);schedule.timer=setTimeout(sync,1200);} return true; }
+    try { await flush(); await pull(); await writeLegacySnapshot(); onStatus('online'); const conflictKeys=new Set((await ZX.Database.all('conflicts')).map(item=>item.key));const retryable=(await ZX.Database.all('outbox')).some(item=>(item.attempts||0)<MAX_ATTEMPTS&&!conflictKeys.has(item.key));if(retryable){clearTimeout(schedule.timer);schedule.timer=setTimeout(sync,1200);} return true; }
     catch (error) { onStatus('error', error); return false; }
   }
   async function migrateLegacy() {

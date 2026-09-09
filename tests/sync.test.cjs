@@ -93,6 +93,38 @@ test('two devices merge different records and preserve both versions of a same-r
   assert.equal((await B.Database.state()).students.find(item => item.id === firstId).name, '设备 B 版本');
 });
 
+test('conflicted records pause in the outbox until the user resolves them', async () => {
+  const scheduled = [];
+  const ZX = loadDevice({ setTimeout: (callback, delay) => { scheduled.push({ callback, delay }); return scheduled.length; }, clearTimeout() {} });
+  const userId = 'abababab-abab-4bab-8bab-abababababab';
+  const studentId = '12121212-1212-4212-8212-121212121212';
+  const cloud = mockCloud(userId);
+  await startDevice(ZX, cloud.client, { activeId: studentId, students: [{ id: studentId, name: '初始名字', scores: [], custom: [], preparations: [], courseProgress: [] }] });
+
+  const state = await ZX.Database.state();
+  state.students[0].name = '本机冲突版';
+  await ZX.Database.persist(state);
+  const row = cloud.rows.get(`students:${studentId}`);
+  cloud.rows.set(`students:${studentId}`, { ...row, name: '云端冲突版', version: row.version + 1, updated_at: new Date().toISOString() });
+
+  let mutationCalls = 0;
+  const originalRpc = cloud.client.rpc;
+  cloud.client.rpc = async (name, args) => {
+    if (name === 'apply_tutor_mutations') mutationCalls++;
+    return originalRpc(name, args);
+  };
+  await ZX.Sync.flush();
+  assert.equal((await ZX.Database.all('conflicts')).length, 1);
+  assert.equal(mutationCalls, 1);
+
+  await ZX.Sync.flush();
+  assert.equal(mutationCalls, 1, 'a known conflict must not be resubmitted');
+  const timersBeforeSync = scheduled.length;
+  await ZX.Sync.sync();
+  assert.equal(scheduled.length, timersBeforeSync, 'a conflict alone must not schedule a tight retry loop');
+  assert.equal((await ZX.Database.get('outbox', `students:${studentId}`)).data.name, '本机冲突版');
+});
+
 test('failed online synchronization schedules an automatic retry', async () => {
   const scheduled = [];
   const ZX = loadDevice({ setTimeout: (callback, delay) => { scheduled.push({ callback, delay }); return scheduled.length; }, clearTimeout() {} });
