@@ -1,7 +1,7 @@
 const { test, expect } = require('@playwright/test');
 const path = require('node:path');
 
-const pageUrl = `file:///${path.resolve('index.html').replace(/\\/g, '/')}`;
+const pageUrl = process.env.ZHIXING_TEST_URL || `file:///${path.resolve('index.html').replace(/\\/g, '/')}`;
 
 test.beforeEach(async ({ page }) => {
   await page.goto(pageUrl);
