@@ -80,3 +80,25 @@ test('Markdown backup round-trip preserves preparations, attachments and free-fo
   });
   expect(result).toEqual({ current: '待测', target: 'A档', prep: '备课', file: '资料.pdf' });
 });
+
+test('preparation and course attachment buttons both start a safe download', async ({ page }) => {
+  await page.getByRole('button', { name: '添加第一位学生' }).click();
+  await page.locator('[name=name]').fill('附件测试');
+  await page.getByRole('button', { name: '保存档案' }).click();
+  await expect(page.locator('#studentNameTitle')).toHaveText('附件测试');
+  await page.evaluate(() => {
+    const student = active();
+    student.preparations = [{ id: crypto.randomUUID(), title: '备课附件', content: '', date: '9/9', files: [{ id: crypto.randomUUID(), name: '备课.txt', type: 'text/plain', data: 'data:text/plain;base64,QQ==' }] }];
+    student.courseProgress = [{ id: crypto.randomUUID(), title: '进度附件', content: '', date: '9/9', files: [{ id: crypto.randomUUID(), name: '进度.txt', type: 'text/plain', data: 'data:text/plain;base64,Qg==' }] }];
+    window.__downloads = [];
+    HTMLAnchorElement.prototype.click = function () { window.__downloads.push({ href: this.href, name: this.download }); };
+    render();
+  });
+
+  await page.locator('.prep-file:not(.course-file)').click();
+  await page.locator('.course-file').click();
+  await expect.poll(() => page.evaluate(() => window.__downloads)).toEqual([
+    { href: 'data:text/plain;base64,QQ==', name: '备课.txt' },
+    { href: 'data:text/plain;base64,Qg==', name: '进度.txt' }
+  ]);
+});
