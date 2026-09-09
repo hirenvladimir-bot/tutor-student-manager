@@ -9,6 +9,8 @@
   let onStatus = () => {};
   let running = false;
   let retryCount = 0;
+  const MAX_ATTEMPTS = 6;
+  const BATCH_SIZE = 20;
 
   const camel = {
     students: row => ({ name: row.name || '', school: row.school || '', targetSchool: row.target_school || '', currentScore: row.current_score, targetScore: row.target_score, nextLesson: row.next_lesson || '', focusContent: row.focus_content || '' }),
@@ -46,22 +48,36 @@
 
   async function flush() {
     if (!client || !userId || !online() || running) return;
-    let queued = await ZX.Database.all('outbox');
+    let queued = (await ZX.Database.all('outbox'))
+      .filter(item => (item.attempts || 0) < MAX_ATTEMPTS)
+      .sort((a, b) => Number(a.entity === 'attachments') - Number(b.entity === 'attachments'))
+      .slice(0, BATCH_SIZE);
     if (!queued.length) return;
     running = true;
     onStatus('syncing');
     try {
-      queued = await Promise.all(queued.map(item => ZX.Files.beforeSync(item)));
-      const payload = queued.map(item => ({ entity: item.entity, id: item.id, student_id: item.studentId, base_version: item.baseVersion, operation: item.operation, data: item.data, deleted_at: item.deletedAt }));
-      const { data, error } = await client.rpc('apply_tutor_mutations', { p_mutations: payload });
-      if (error) throw error;
-      for (const item of data?.applied || []) await ZX.Database.markApplied(item.key, item.version, item.updated_at);
-      await ZX.Files.afterApplied(data?.applied || [], queued);
-      for (const conflict of data?.conflicts || []) await ZX.Database.saveConflict({ ...conflict, local: queued.find(x => x.key === conflict.key) });
+      const ready = [], uploadErrors = [];
+      for (const item of queued) {
+        try { ready.push(await ZX.Files.beforeSync(item)); }
+        catch (error) {
+          uploadErrors.push(error);
+          await ZX.Database.put('outbox', { ...item, attempts: (item.attempts || 0) + 1, lastError: error.message || String(error), lastAttemptAt: new Date().toISOString() });
+        }
+      }
+      if (ready.length) {
+        const payload = ready.map(item => ({ entity: item.entity, id: item.id, student_id: item.studentId, base_version: item.baseVersion, operation: item.operation, data: item.data, deleted_at: item.deletedAt }));
+        const { data, error } = await client.rpc('apply_tutor_mutations', { p_mutations: payload });
+        if (error) {
+          for (const item of ready) await ZX.Database.put('outbox', { ...item, attempts: (item.attempts || 0) + 1, lastError: error.message, lastAttemptAt: new Date().toISOString() });
+          throw error;
+        }
+        for (const item of data?.applied || []) await ZX.Database.markApplied(item.key, item.version, item.updated_at);
+        await ZX.Files.afterApplied(data?.applied || [], ready);
+        for (const conflict of data?.conflicts || []) await ZX.Database.saveConflict({ ...conflict, local: ready.find(x => x.key === conflict.key) });
+      }
       retryCount = 0; clearTimeout(sync.retryTimer);
-      onStatus('online');
+      if (uploadErrors.length) onStatus('error', uploadErrors[0]); else onStatus('online');
     } catch (error) {
-      for (const item of queued) await ZX.Database.put('outbox', { ...item, attempts: (item.attempts || 0) + 1, lastError: error.message, lastAttemptAt: new Date().toISOString() });
       onStatus('error', error);
       if (online()) { clearTimeout(sync.retryTimer); const delay = Math.min(60000, 5000 * (2 ** Math.min(retryCount++, 3))); sync.retryTimer = setTimeout(sync, delay); }
       throw error;
@@ -70,7 +86,7 @@
 
   async function sync() {
     if (!userId || !online()) { onStatus('offline'); return; }
-    try { await flush(); await pull(); await writeLegacySnapshot(); onStatus('online'); }
+    try { await flush(); await pull(); await writeLegacySnapshot(); onStatus('online'); const retryable=(await ZX.Database.all('outbox')).some(item=>(item.attempts||0)<MAX_ATTEMPTS);if(retryable){clearTimeout(schedule.timer);schedule.timer=setTimeout(sync,1200);} }
     catch (error) { onStatus('error', error); }
   }
   async function migrateLegacy() {

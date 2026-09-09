@@ -39,3 +39,23 @@ test('cloud conflict choice can replace the local record without data loss', asy
   assert.equal((await ZX.Database.state()).students[0].name, '云端版');
   assert.equal((await ZX.Database.all('conflicts')).length, 0);
 });
+
+test('failed attachment uploads can be retried or discarded in bulk without deleting their parent record', async () => {
+  await ZX.Database.wipe();
+  const studentId = '33333333-3333-4333-8333-333333333333';
+  const prepId = '44444444-4444-4444-8444-444444444444';
+  const attachmentId = '55555555-5555-4555-8555-555555555555';
+  await ZX.Database.start({ students: [{ id: studentId, name: '学生', scores: [], custom: [], preparations: [{ id: prepId, title: '备课', files: [{ id: attachmentId, name: '失败.pdf', pending: true, localBlobKey: 'blob:failed' }] }], courseProgress: [] }], activeId: studentId });
+  const key = `attachments:${attachmentId}`;
+  const record = await ZX.Database.get('records', key);
+  await ZX.Database.put('outbox', { ...record, operation: 'upsert', baseVersion: 0, attempts: 6 });
+  await ZX.Database.put('blobs', { key: 'blob:failed', buffer: new Uint8Array([1, 2, 3]).buffer });
+
+  assert.equal(await ZX.Database.retryFailedUploads(), 1);
+  assert.equal((await ZX.Database.get('outbox', key)).attempts, 0);
+  await ZX.Database.put('outbox', { ...(await ZX.Database.get('outbox', key)), attempts: 6 });
+  assert.equal(await ZX.Database.discardFailedUploads(), 1);
+  assert.equal(await ZX.Database.get('outbox', key), undefined);
+  assert.equal((await ZX.Database.state()).students[0].preparations[0].title, '备课');
+  assert.equal((await ZX.Database.state()).students[0].preparations[0].files.length, 0);
+});

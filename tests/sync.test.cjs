@@ -110,3 +110,39 @@ test('failed online synchronization schedules an automatic retry', async () => {
   assert.equal(scheduled[0].delay, 5000);
   assert.equal((await ZX.Database.all('outbox'))[0].attempts, 1);
 });
+
+test('one failed attachment does not block other records or increment their retry count', async () => {
+  const ZX = loadDevice();
+  const cloud = mockCloud('cccccccc-cccc-4ccc-8ccc-cccccccccccc');
+  await startDevice(ZX, cloud.client, { students: [], activeId: null });
+  const studentId = '66666666-6666-4666-8666-666666666666';
+  await ZX.Database.put('outbox', { key: `students:${studentId}`, entity: 'students', id: studentId, studentId: null, data: { name: '可正常同步' }, version: 0, baseVersion: 0, operation: 'upsert', attempts: 0 });
+  const attachmentId = '77777777-7777-4777-8777-777777777777';
+  await ZX.Database.put('outbox', { key: `attachments:${attachmentId}`, entity: 'attachments', id: attachmentId, studentId, data: { name: '失败.pdf', localBlobKey: 'blob:failed' }, version: 0, baseVersion: 0, operation: 'upsert', attempts: 0 });
+  const originalBeforeSync = ZX.Files.beforeSync;
+  ZX.Files.beforeSync = async item => { if (item.entity === 'attachments') throw new Error('TUS denied'); return item; };
+
+  await ZX.Sync.flush();
+  ZX.Files.beforeSync = originalBeforeSync;
+  assert.ok(cloud.rows.has(`students:${studentId}`));
+  assert.equal(await ZX.Database.get('outbox', `students:${studentId}`), undefined);
+  assert.equal((await ZX.Database.get('outbox', `attachments:${attachmentId}`)).attempts, 1);
+});
+
+test('sync processes a bounded batch instead of flooding the network', async () => {
+  const ZX = loadDevice();
+  const cloud = mockCloud('dddddddd-dddd-4ddd-8ddd-dddddddddddd');
+  await startDevice(ZX, cloud.client, { students: [], activeId: null });
+  for (let index = 0; index < 25; index++) {
+    const id = `80000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+    await ZX.Database.put('outbox', { key: `students:${id}`, entity: 'students', id, studentId: null, data: { name: `学生${index}` }, version: 0, baseVersion: 0, operation: 'upsert', attempts: 0 });
+  }
+  await ZX.Sync.flush();
+  assert.equal(cloud.rows.size, 20);
+  assert.equal((await ZX.Database.all('outbox')).length, 5);
+});
+
+test('production TUS endpoint uses the direct Supabase Storage hostname', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  assert.match(source, /nnnxsjqbklnykshqgntt\.storage\.supabase\.co\/storage\/v1\/upload\/resumable/);
+});

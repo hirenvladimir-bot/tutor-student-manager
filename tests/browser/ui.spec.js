@@ -70,6 +70,8 @@ test('offline attachment is queued without losing preparation text', async ({ pa
   await page.locator('#sidebarAuthButton').click();
   await expect(page.locator('#uploadQueue')).toContainText('讲义.pdf');
   await page.locator('.cancel-upload').click();
+  await expect(page.locator('#confirmDialog')).toHaveAttribute('open', '');
+  await page.locator('#confirmAccept').click();
   await expect(page.locator('#uploadQueue')).toBeHidden();
   await expect(page.locator('#prepList')).not.toContainText('讲义.pdf');
   expect(await page.evaluate(() => Zhixing.Database.all('blobs').then(items => items.length))).toBe(0);
@@ -211,4 +213,22 @@ test('Escape and backdrop follow the same safe dialog close rules', async ({ pag
   await page.locator('#openCloudSettings').click();
   await page.keyboard.press('Escape');
   await expect(page.locator('#cloudDialog')).not.toHaveAttribute('open', '');
+});
+
+test('large failed upload queues stay bounded and can be retried in bulk', async ({ page }) => {
+  await page.evaluate(async () => {
+    for (let index = 0; index < 45; index++) {
+      const id = `90000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+      await Zhixing.Database.put('outbox', { key: `attachments:${id}`, entity: 'attachments', id, studentId: 'student', data: { name: `file-${index}.pdf`, localBlobKey: `blob:${index}` }, baseVersion: 0, operation: 'upsert', attempts: 6, lastError: 'temporary failure' });
+    }
+    document.querySelector('#dataDialog').showModal();
+    await renderSyncStatus();
+  });
+  await expect(page.locator('.upload-item')).toHaveCount(40);
+  await expect(page.locator('.queue-more')).toContainText('另有 5 项');
+  const overflow = await page.locator('#dataDialog').evaluate(dialog => dialog.scrollWidth > dialog.clientWidth);
+  expect(overflow).toBeFalsy();
+  await page.locator('#retryFailedUploads').click();
+  await expect(page.locator('#dataMessage')).toContainText('45 个失败附件');
+  expect(await page.evaluate(() => Zhixing.Database.all('outbox').then(items => items.every(item => item.attempts === 0)))).toBeTruthy();
 });
