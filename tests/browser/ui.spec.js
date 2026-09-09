@@ -105,7 +105,7 @@ test('an expired cached account is not presented as signed in', async ({ page })
   await page.evaluate(() => localStorage.setItem('zhixing-tutor-cloud-v1', JSON.stringify({ auto: true, userEmail: 'stale@example.com', lastSync: new Date().toISOString() })));
   await page.reload();
   await expect(page.locator('#sidebarStorageText')).toHaveText('数据仅保存于此浏览器');
-  await page.locator('#sidebarAuthButton').click();
+  await page.evaluate(() => openDataCenter());
   await expect(page.locator('#cloudCheckBtn')).toBeHidden();
   await expect(page.locator('#cloudSummary')).toHaveText('尚未登录同步账号');
 });
