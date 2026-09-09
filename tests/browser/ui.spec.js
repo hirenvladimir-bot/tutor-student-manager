@@ -173,3 +173,31 @@ test('responsive layout avoids body zoom and horizontal overflow at a 200% equiv
   await page.locator('#sidebarAuthButton').click();
   await expect(page.locator('#dataDialog')).toHaveAttribute('open', '');
 });
+
+test('Escape and backdrop follow the same safe dialog close rules', async ({ page }) => {
+  await page.getByRole('button', { name: '添加第一位学生' }).click();
+  await page.locator('[name=name]').fill('弹窗测试');
+  await page.getByRole('button', { name: '保存档案' }).click();
+
+  await page.locator('#addPrepBtn').click();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#prepDialog')).not.toHaveAttribute('open', '');
+
+  await page.locator('#addCourseBtn').click();
+  await page.locator('#courseItemForm [name=title]').fill('尚未保存');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#confirmDialog')).toHaveAttribute('open', '');
+  await page.locator('#confirmDialog [value=cancel]').click();
+  await expect(page.locator('#courseDialog')).toHaveAttribute('open', '');
+  await page.locator('#cancelCourseDialog').click();
+  await page.locator('#confirmAccept').click();
+
+  await page.locator('#addCustomBtn').click();
+  await page.locator('#customDialog').evaluate(dialog => dialog.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  await expect(page.locator('#customDialog')).not.toHaveAttribute('open', '');
+
+  await page.locator('#sidebarAuthButton').click();
+  await page.locator('#openCloudSettings').click();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#cloudDialog')).not.toHaveAttribute('open', '');
+});
