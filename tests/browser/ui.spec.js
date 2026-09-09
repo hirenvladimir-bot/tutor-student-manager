@@ -81,6 +81,35 @@ test('Markdown backup round-trip preserves preparations, attachments and free-fo
   expect(result).toEqual({ current: '待测', target: 'A档', prep: '备课', file: '资料.pdf' });
 });
 
+test('readable Markdown remains importable without the embedded machine backup', async ({ page }) => {
+  const result = await page.evaluate(() => {
+    state = Zhixing.Model.ensureIds({ activeId: 'a', students: [{
+      id: 'a', name: '纯文本回导', school: '一中', targetSchool: '实验中学', currentScore: '待测', targetScore: 'A档',
+      nextLesson: '函数', focusContent: '审题', scores: [{ id: 's', date: '2026-09-09', label: '月考', score: 86.5 }],
+      custom: [{ id: 'c', key: '教材', value: '人教版' }],
+      preparations: [{ id: 'p', date: '9/9', title: '备课一', content: '讲义安排', files: [{ id: 'f', name: '讲义.pdf', relativePath: '资料/讲义.pdf', path: 'u/a/p/guide.pdf', type: 'application/pdf', size: 123 }] }],
+      courseProgress: [{ id: 'q', date: '9/8', title: '一次函数', content: '已掌握', files: [{ id: 'g', name: '作业.docx', path: 'u/a/q/homework.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', size: 456 }] }]
+    }] });
+    const readable = markdownBackup(false).replace(/\n\n\[\[ZHIXING_V2:[A-Za-z0-9+/=]+\]\]\s*$/, '');
+    const restored = parsePortableTextBackup(readable).students[0];
+    return {
+      current: restored.currentScore, target: restored.targetScore, score: restored.scores[0]?.score,
+      prep: restored.preparations[0], course: restored.courseProgress[0], custom: restored.custom[0],
+      nextLesson: restored.nextLesson, focusContent: restored.focusContent
+    };
+  });
+  expect(result.current).toBe('待测');
+  expect(result.target).toBe('A档');
+  expect(result.score).toBe(86.5);
+  expect(result.prep).toMatchObject({ title: '备课一', content: '讲义安排' });
+  expect(result.prep.files[0]).toMatchObject({ name: '讲义.pdf', relativePath: '资料/讲义.pdf', path: 'u/a/p/guide.pdf', type: 'application/pdf', size: 123 });
+  expect(result.course).toMatchObject({ title: '一次函数', content: '已掌握' });
+  expect(result.course.files[0]).toMatchObject({ name: '作业.docx', path: 'u/a/q/homework.docx', size: 456 });
+  expect(result.custom).toEqual(expect.objectContaining({ key: '教材', value: '人教版' }));
+  expect(result.nextLesson).toBe('函数');
+  expect(result.focusContent).toBe('审题');
+});
+
 test('preparation and course attachment buttons both start a safe download', async ({ page }) => {
   await page.getByRole('button', { name: '添加第一位学生' }).click();
   await page.locator('[name=name]').fill('附件测试');
