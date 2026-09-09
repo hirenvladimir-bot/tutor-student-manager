@@ -157,6 +157,21 @@ test('custom information deletes immediately without a confirmation dialog', asy
   await expect(page.locator('#confirmDialog')).not.toHaveAttribute('open', '');
 });
 
+test('rapid local saves are serialized and retain the newest value', async ({ page }) => {
+  await page.getByRole('button', { name: '添加第一位学生' }).click();
+  await page.locator('#studentForm [name=name]').fill('快速保存测试');
+  await page.getByRole('button', { name: '保存档案' }).click();
+  const result = await page.evaluate(async () => {
+    const studentId = active().id, tasks = [];
+    for (let index = 0; index < 25; index++) { active().nextLesson = `最终值-${index}`; tasks.push(save()); }
+    await Promise.all(tasks);
+    const record = await window.Zhixing.Database.get('outbox', `students:${studentId}`);
+    const stored = await window.Zhixing.Database.state();
+    return { queued: record.data.nextLesson, stored: stored.students[0].nextLesson, local: JSON.parse(localStorage.getItem(storeKey)).students[0].nextLesson };
+  });
+  expect(result).toEqual({ queued: '最终值-24', stored: '最终值-24', local: '最终值-24' });
+});
+
 test('modified optional dialog uses in-app confirmation and has no overflow', async ({ page }) => {
   await page.getByRole('button', { name: '添加第一位学生' }).click();
   await page.locator('[name=name]').fill('未保存');
