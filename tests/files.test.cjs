@@ -84,6 +84,9 @@ test('TUS upload resumes a previous fingerprint and preserves a folder path', as
   assert.equal(uploads[0].options.chunkSize, 6 * 1024 * 1024);
   assert.equal(uploads[0].options.metadata.bucketName, 'tutor-files');
   assert.match(uploads[0].options.metadata.objectName, /^user-a\/student-a\/preparations\/prep-a\/.+-file\.pdf$/);
+  const fingerprint = uploads[0].options.fingerprint();
+  assert.equal(typeof fingerprint?.then, 'function', 'tus-js-client v4 requires an asynchronous fingerprint callback');
+  assert.match(await fingerprint, /^tutor-files\/user-a\/student-a\/preparations\/prep-a\//);
   assert.equal(uploaded.data.relativePath, '第一章/讲义.pdf');
   assert.equal(uploaded.data.pending, false);
   assert.equal(uploaded.data.localBlobKey, undefined);
