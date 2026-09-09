@@ -19,6 +19,24 @@
       task.findPreviousUploads().then(found => { if (found.length) task.resumeFromPreviousUpload(found[0]); task.start(); }).catch(reject);
     });
   }
+  async function queueCleanup(path) {
+    if (!path) return;
+    const existing = await ZX.Database.get('cleanup', path);
+    await ZX.Database.put('cleanup', existing || { key: path, path, attempts: 0, queuedAt: new Date().toISOString() });
+  }
+  async function processCleanup() {
+    if (!client || root.navigator?.onLine === false) return;
+    const queued = await ZX.Database.all('cleanup');
+    for (const item of queued) {
+      try {
+        const { error } = await client.storage.from(bucket).remove([item.path]);
+        if (error && !/not found/i.test(error.message || '')) throw error;
+        await ZX.Database.remove('cleanup', item.key);
+      } catch (error) {
+        await ZX.Database.put('cleanup', { ...item, attempts: (item.attempts || 0) + 1, lastError: error.message || String(error), lastAttemptAt: new Date().toISOString() });
+      }
+    }
+  }
   async function prepare(files, section, recordId, studentId, status = () => {}) {
     const list = [...files];
     let session = null, user = null;
@@ -43,7 +61,6 @@
   async function beforeSync(mutation) {
     if (mutation.entity !== 'attachments') return mutation;
     if (mutation.operation === 'delete') {
-      if (mutation.data.path) { const { error } = await client.storage.from(bucket).remove([mutation.data.path]); if (error && !/not found/i.test(error.message)) throw error; }
       if (mutation.data.localBlobKey) await ZX.Database.remove('blobs', mutation.data.localBlobKey);
       return mutation;
     }
@@ -65,5 +82,18 @@
     }
     return mutation;
   }
-  ZX.Files = { configure, prepare, beforeSync };
+  async function afterApplied(applied, queued) {
+    const keys = new Set((applied || []).map(item => item.key));
+    for (const mutation of queued || []) {
+      if (keys.has(mutation.key) && mutation.entity === 'attachments' && mutation.operation === 'delete') await queueCleanup(mutation.data.path);
+    }
+    await processCleanup();
+  }
+  async function discardConflict(conflict) {
+    const local = conflict?.local;
+    if (local?.entity !== 'attachments') return;
+    if (local.data?.localBlobKey) await ZX.Database.remove('blobs', local.data.localBlobKey);
+    if (local.data?.path && local.data.path !== conflict.cloud?.data?.path) await queueCleanup(local.data.path);
+  }
+  ZX.Files = { configure, prepare, beforeSync, afterApplied, queueCleanup, processCleanup, discardConflict };
 })(window);

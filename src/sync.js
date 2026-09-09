@@ -55,6 +55,7 @@
       const { data, error } = await client.rpc('apply_tutor_mutations', { p_mutations: payload });
       if (error) throw error;
       for (const item of data?.applied || []) await ZX.Database.markApplied(item.key, item.version, item.updated_at);
+      await ZX.Files.afterApplied(data?.applied || [], queued);
       for (const conflict of data?.conflicts || []) await ZX.Database.saveConflict({ ...conflict, local: queued.find(x => x.key === conflict.key) });
       onStatus('online');
     } catch (error) {
@@ -97,9 +98,15 @@
     return true;
   }
   async function stop() { if (channel && client) await client.removeChannel(channel); channel = null; userId = null; }
-  async function resolve(key, choice) { await ZX.Database.resolveConflict(key, choice); await flush(); await pull(); }
+  async function resolve(key, choice) {
+    const conflict = await ZX.Database.get('conflicts', key);
+    if (choice === 'cloud') await ZX.Files.discardConflict(conflict);
+    await ZX.Database.resolveConflict(key, choice);
+    await ZX.Files.processCleanup();
+    await flush(); await pull();
+  }
   function schedule() { clearTimeout(schedule.timer); schedule.timer = setTimeout(sync, 900); }
-  root.addEventListener('online', sync);
+  root.addEventListener('online', () => { ZX.Files.processCleanup(); sync(); });
   root.addEventListener('offline', () => onStatus('offline'));
   ZX.Sync = { start, stop, sync, pull, flush, schedule, resolve, online };
 })(window);

@@ -2,8 +2,8 @@
   'use strict';
   const ZX = root.Zhixing = root.Zhixing || {};
   const DB_NAME = 'zhixing-tutor-v2';
-  const DB_VERSION = 1;
-  const STORES = ['records', 'outbox', 'conflicts', 'blobs', 'meta'];
+  const DB_VERSION = 2;
+  const STORES = ['records', 'outbox', 'conflicts', 'blobs', 'cleanup', 'meta'];
   let db;
   let baseline = new Map();
 
@@ -79,7 +79,10 @@
     await remove('conflicts', key);
   }
   async function state() { const meta = await get('meta', 'state'); return ZX.Model.hydrate(baseline, meta?.activeId); }
-  async function stats() { return { pending: (await all('outbox')).length, conflicts: (await all('conflicts')).length, failed: (await all('outbox')).filter(x => x.attempts >= 3).length }; }
+  async function stats() {
+    const outbox = await all('outbox'), cleanup = await all('cleanup');
+    return { pending: outbox.length, cleanup: cleanup.length, conflicts: (await all('conflicts')).length, failed: outbox.filter(x => x.attempts >= 3).length + cleanup.filter(x => x.attempts >= 3).length };
+  }
   async function queueNewRecords() { for (const record of baseline.values()) if (!record.deletedAt && record.version === 0 && !(await get('outbox', record.key))) await put('outbox', { ...record, baseVersion: 0, operation: 'upsert', attempts: 0, queuedAt: new Date().toISOString() }); }
   async function discardLocalRecord(key) { const record = baseline.get(key) || await get('outbox', key); if (record?.data?.localBlobKey) await remove('blobs', record.data.localBlobKey); await remove('outbox', key); await remove('records', key); await remove('conflicts', key); baseline.delete(key); }
   async function wipe() { for (const store of STORES) await clear(store); baseline = new Map(); }
