@@ -5,11 +5,11 @@ const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
 const { IDBFactory } = require('fake-indexeddb');
 
-function load(tus) {
+function load(tus, fetchImpl = fetch) {
   const indexedDB = new IDBFactory();
   const window = { crypto: webcrypto, indexedDB, navigator: { onLine: true }, tus };
   window.window = window;
-  const context = { window, crypto: webcrypto, indexedDB, structuredClone, console, navigator: window.navigator, Blob, fetch, setTimeout, clearTimeout };
+  const context = { window, crypto: webcrypto, indexedDB, structuredClone, console, navigator: window.navigator, Blob, fetch: fetchImpl, setTimeout, clearTimeout };
   for (const file of ['src/model.js', 'src/database.js', 'src/files.js']) vm.runInNewContext(fs.readFileSync(file, 'utf8'), context);
   return window.Zhixing;
 }
@@ -156,4 +156,31 @@ test('a retry reuses the persisted upload path so TUS can resume after restart',
   assert.equal(paths[1], paths[0]);
   assert.equal(completed.data.path, paths[0]);
   assert.equal(completed.data.uploadPath, undefined);
+});
+
+test('cloud diagnostic verifies TUS, signed download and temporary object cleanup', async () => {
+  let uploadedPath = '', signedPath = '', removedPath = '', uploadedText;
+  class Upload {
+    constructor(file, options) { this.file = file; this.options = options; uploadedPath = options.metadata.objectName; uploadedText = file.text(); }
+    async findPreviousUploads() { return []; }
+    start() { this.options.onProgress(this.file.size, this.file.size); this.options.onSuccess(); }
+  }
+  const client = {
+    auth: {
+      getSession: async () => ({ data: { session: { access_token: 'diagnostic-token', user: { id: 'diagnostic-user' } } }, error: null }),
+      getUser: async () => ({ data: { user: { id: 'diagnostic-user' } } })
+    },
+    storage: { from: () => ({
+      createSignedUrl: async path => { signedPath = path; return { data: { signedUrl: 'https://storage.test/signed' }, error: null }; },
+      remove: async paths => { removedPath = paths[0]; return { error: null }; }
+    }) }
+  };
+  const ZX = load({ Upload }, async () => ({ ok: true, status: 200, text: async () => uploadedText }));
+  ZX.Files.configure({ client, bucket: 'tutor-files', endpoint: 'https://storage.test/upload/resumable' });
+  const result = await ZX.Files.diagnose();
+  assert.match(result.path, /^diagnostic-user\/self-test\/.+-file\.txt$/);
+  assert.equal(uploadedPath, result.path);
+  assert.equal(signedPath, result.path);
+  assert.equal(removedPath, result.path);
+  assert.ok(result.size > 0);
 });

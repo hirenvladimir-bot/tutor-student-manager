@@ -28,6 +28,41 @@
     await Promise.all([...activeUploads.values()].map(active => active.cancel().catch(() => {})));
     if (root.localStorage) for (let index = root.localStorage.length - 1; index >= 0; index--) { const key = root.localStorage.key(index); if (key?.startsWith('tus::')) root.localStorage.removeItem(key); }
   }
+  async function diagnose() {
+    if (!client || !bucket || !endpoint) throw new Error('附件服务尚未配置');
+    const { data: sessionData, error: sessionError } = await client.auth.getSession();
+    if (sessionError) throw sessionError;
+    const session = sessionData?.session;
+    const user = session?.user || (await client.auth.getUser()).data.user;
+    if (!session?.access_token || !user) throw new Error('需要登录后才能运行云端自检');
+    const marker = `zhixing storage diagnostic ${new Date().toISOString()}`;
+    const source = new Blob([marker], { type: 'text/plain;charset=utf-8' });
+    const path = `${user.id}/self-test/${uuid()}-file.txt`;
+    let uploaded = false, primaryError = null;
+    try {
+      onStatus('云端自检：正在测试 TUS 上传（0%）');
+      await upload(source, path, session.access_token, percent => onStatus(`云端自检：正在测试 TUS 上传（${percent}%）`), `diagnostic:${path}`);
+      uploaded = true;
+      const { data, error } = await client.storage.from(bucket).createSignedUrl(path, 60);
+      if (error) throw error;
+      if (!data?.signedUrl) throw new Error('未能生成附件签名下载链接');
+      const response = await fetch(data.signedUrl, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`签名下载返回 HTTP ${response.status}`);
+      if ((await response.text()) !== marker) throw new Error('签名下载内容校验失败');
+      return { path, size: source.size };
+    } catch (error) {
+      primaryError = error;
+      throw error;
+    } finally {
+      if (uploaded) {
+        const { error } = await client.storage.from(bucket).remove([path]);
+        if (error) {
+          await queueCleanup(path);
+          if (!primaryError) throw new Error(`测试文件已进入待清理队列：${error.message || error}`);
+        }
+      }
+    }
+  }
   async function queueCleanup(path) {
     if (!path) return;
     const existing = await ZX.Database.get('cleanup', path);
@@ -103,5 +138,5 @@
     if (local.data?.localBlobKey) await ZX.Database.remove('blobs', local.data.localBlobKey);
     if (local.data?.path && local.data.path !== conflict.cloud?.data?.path) await queueCleanup(local.data.path);
   }
-  ZX.Files = { configure, prepare, beforeSync, afterApplied, queueCleanup, processCleanup, discardConflict, cancel, clearLocal };
+  ZX.Files = { configure, prepare, beforeSync, afterApplied, queueCleanup, processCleanup, discardConflict, cancel, clearLocal, diagnose };
 })(window);

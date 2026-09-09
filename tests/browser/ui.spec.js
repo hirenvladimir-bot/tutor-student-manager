@@ -101,6 +101,34 @@ test('blank student form closes without native validation', async ({ page }) => 
   await expect(page.locator('#studentDialog')).not.toHaveAttribute('open', '');
 });
 
+test('an expired cached account is not presented as signed in', async ({ page }) => {
+  await page.evaluate(() => localStorage.setItem('zhixing-tutor-cloud-v1', JSON.stringify({ auto: true, userEmail: 'stale@example.com', lastSync: new Date().toISOString() })));
+  await page.reload();
+  await expect(page.locator('#sidebarStorageText')).toHaveText('数据仅保存于此浏览器');
+  await page.locator('#sidebarAuthButton').click();
+  await expect(page.locator('#cloudCheckBtn')).toBeHidden();
+  await expect(page.locator('#cloudSummary')).toHaveText('尚未登录同步账号');
+});
+
+test('cloud diagnostic button is wired and remains inside the data center', async ({ page }) => {
+  await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true');
+  await page.evaluate(async () => {
+    cloud.userEmail = 'diagnostic@example.com';
+    supabaseClient.auth.getSession = async () => ({ data: { session: { user: { id: 'diagnostic-user' } } }, error: null });
+    supabaseClient.from = () => ({ select: () => ({ eq: () => ({ limit: async () => ({ error: null }) }) }) });
+    supabaseClient.rpc = async () => ({ data: { applied: [], conflicts: [] }, error: null });
+    window.Zhixing.Files.diagnose = async () => ({ path: 'diagnostic-user/self-test/file.txt', size: 16 });
+    await renderSyncStatus();
+    openDataCenter();
+  });
+  await expect(page.locator('#cloudCheckBtn')).toBeVisible();
+  await page.locator('#cloudCheckBtn').click();
+  await expect(page.locator('#dataMessage')).toContainText('云端自检通过');
+  await expect(page.locator('#syncDetail')).toContainText('云端自检');
+  const overflow = await page.locator('#dataDialog form').evaluate(element => element.scrollWidth > element.clientWidth);
+  expect(overflow).toBeFalsy();
+});
+
 test('free-form scores save and progress records can be edited', async ({ page }) => {
   await page.getByRole('button', { name: '添加第一位学生' }).click();
   await page.locator('[name=name]').fill('测试学生');
