@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>知行 · 家教学生管理</title>
   <link rel="stylesheet" href="style.css" />
-  <link rel="stylesheet" href="ui-overrides.css?v=18" />
+  <link rel="stylesheet" href="ui-overrides.css?v=19" />
 </head>
 <body>
   <main class="app-shell">
@@ -14,7 +14,7 @@
       <button class="add-student" id="openStudentDialog">＋ 添加学生</button>
       <div class="sidebar-label"><span>学生档案</span><span id="studentCount">0</span></div>
       <div class="student-list" id="studentList"></div>
-      <div class="sidebar-bottom"><button class="sidebar-auth" id="sidebarAuthButton"><span class="sidebar-auth-dot" id="syncDot"></span><span id="syncStatus">数据中心</span></button><div class="sidebar-foot" id="sidebarStorageText">数据仅保存于此浏览器</div></div>
+      <div class="sidebar-bottom"><button class="sidebar-auth" id="sidebarAuthButton"><span class="sidebar-auth-dot" id="syncDot"></span><span id="syncStatus">数据中心</span></button><div class="sidebar-sync-state ok" id="sidebarSyncText" role="status" aria-live="polite">本机数据已保存</div><div class="sidebar-foot" id="sidebarStorageText">数据仅保存于此浏览器</div></div>
     </aside>
 
     <section class="workspace">
@@ -106,9 +106,9 @@
   <script src="vendor/tus.min.js"></script>
   <script src="src/model.js?v=3"></script>
   <script src="src/database.js?v=4"></script>
-  <script src="src/files.js?v=9"></script>
-<script src="src/sync.js?v=10"></script>
+  <script src="src/files.js?v=10"></script>
+  <script src="src/sync.js?v=11"></script>
   <script src="src/portable.js?v=1"></script>
-  <script src="app.js?v=50"></script>
+  <script src="app.js?v=52"></script>
 </body>
 </html>

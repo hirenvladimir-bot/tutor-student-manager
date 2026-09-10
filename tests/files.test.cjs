@@ -73,8 +73,8 @@ test('TUS upload resumes a previous fingerprint and preserves a folder path', as
     resumeFromPreviousUpload(previous) { this.resumed = previous; }
     start() { this.options.onProgress(this.file.size, this.file.size); this.options.onSuccess(); }
   }
-  const ZX = load({ Upload }), status = [];
-  ZX.Files.configure({ client: uploadClient(), bucket: 'tutor-files', endpoint: 'https://storage.test/upload/resumable', onStatus: message => status.push(message) });
+  const ZX = load({ Upload }), status = [], events = [];
+  ZX.Files.configure({ client: uploadClient(), bucket: 'tutor-files', endpoint: 'https://storage.test/upload/resumable', onStatus: (message, detail) => { status.push(message); if (detail) events.push(detail); } });
   const [attachment] = await ZX.Files.prepare([mockFile('讲义.pdf', '第一章/讲义.pdf')], 'preparations', 'prep-a', 'student-a', message => status.push(message));
   const mutation = { key: `attachments:${attachment.id}`, entity: 'attachments', id: attachment.id, studentId: 'student-a', baseVersion: 0, operation: 'upsert', data: { ...attachment, ownerType: 'preparations', ownerId: 'prep-a' } };
   const uploaded = await ZX.Files.beforeSync(mutation);
@@ -91,6 +91,24 @@ test('TUS upload resumes a previous fingerprint and preserves a folder path', as
   assert.equal(uploaded.data.pending, false);
   assert.equal(uploaded.data.localBlobKey, undefined);
   assert.ok(status.some(message => /100%/.test(message)));
+  assert.ok(events.some(event => event.key === mutation.key && event.state === 'uploading' && event.percent === 100));
+  assert.ok(events.some(event => event.key === mutation.key && event.state === 'syncing' && event.percent === 100));
+});
+
+test('attachment upload reports a distinct live failure state', async () => {
+  class Upload {
+    constructor(file, options) { this.options = options; }
+    async findPreviousUploads() { return []; }
+    start() { this.options.onProgress(3, 10); this.options.onError(new Error('network interrupted')); }
+  }
+  const ZX = load({ Upload }), events = [];
+  ZX.Files.configure({ client: uploadClient(), bucket: 'tutor-files', endpoint: 'https://storage.test/upload/resumable', onStatus: (_message, detail) => detail && events.push(detail) });
+  const [attachment] = await ZX.Files.prepare([mockFile('中断.pdf')], 'preparations', 'prep-a', 'student-a');
+  const mutation = { key: `attachments:${attachment.id}`, entity: 'attachments', id: attachment.id, studentId: 'student-a', baseVersion: 0, operation: 'upsert', data: { ...attachment, ownerType: 'preparations', ownerId: 'prep-a' } };
+  await assert.rejects(ZX.Files.beforeSync(mutation), /network interrupted/);
+  assert.ok(events.some(event => event.state === 'uploading' && event.percent === 30));
+  assert.equal(events.at(-1).state, 'failed');
+  assert.equal(events.at(-1).key, mutation.key);
 });
 
 test('a local batch cache failure rolls back blobs already stored for that batch', async () => {

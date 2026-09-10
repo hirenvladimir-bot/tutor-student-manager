@@ -115,7 +115,7 @@ test('an expired cached account is not presented as signed in', async ({ page })
 test('local interface becomes ready without waiting for cloud restoration', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true');
   const source = await page.locator('script[src*="app.js"]').getAttribute('src');
-  expect(source).toContain('v=50');
+  expect(source).toContain('v=52');
   const bootstrapSource = await page.evaluate(() => bootstrap.toString());
   expect(bootstrapSource).not.toContain('await restoreSession');
   expect(bootstrapSource).toContain('restoreSession().then');
@@ -177,6 +177,28 @@ test('overview profile fields support quick editing and local persistence', asyn
   expect(stored).toMatchObject({ currentScore: '阶段待测', school: '青冈八中', targetSchool: '东北农业大学', targetScore: 'A 档' });
   await expect(page.locator('#targetScoreUnit')).toBeHidden();
   expect(await page.evaluate(() => Zhixing.Database.stats().then(stats => stats.pending))).toBeGreaterThan(0);
+});
+
+test('every saved edit schedules cloud sync and exposes live status', async ({ page }) => {
+  await page.getByRole('button', { name: '添加第一位学生' }).click();
+  await page.locator('#studentForm [name=name]').fill('自动同步测试');
+  await page.getByRole('button', { name: '保存档案' }).click();
+  await page.evaluate(() => {
+    cloud.userEmail = 'sync@example.com';
+    cloud.auto = true;
+    syncEngine = 'v2';
+    window.__scheduledSyncs = 0;
+    window.Zhixing.Sync.schedule = () => { window.__scheduledSyncs++; };
+  });
+  await page.locator('[data-quick-field="school"]').click();
+  await page.locator('#quickEditForm [name=value]').fill('实时同步学校');
+  await page.getByRole('button', { name: '保存修改' }).click();
+  await expect.poll(() => page.evaluate(() => window.__scheduledSyncs)).toBeGreaterThan(0);
+  await expect(page.locator('#sidebarSyncText')).toContainText('等待同步');
+  await page.evaluate(() => handleSyncStatus('syncing'));
+  await expect(page.locator('#sidebarSyncText')).toHaveText('正在同步到云端…');
+  await page.evaluate(async () => { for (const item of await Zhixing.Database.all('outbox')) await Zhixing.Database.remove('outbox', item.key); handleSyncStatus('online'); });
+  await expect(page.locator('#sidebarSyncText')).toHaveText('已同步到云端');
 });
 
 test('invalid exam scores and download errors use in-app messages instead of native alerts', async ({ page }) => {
@@ -269,9 +291,15 @@ test('offline attachment is queued without losing preparation text', async ({ pa
   await page.locator('#prepForm [name=files]').setInputFiles({ name: '讲义.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-test') });
   await page.getByRole('button', { name: '保存备课' }).click();
   await expect(page.locator('#prepList')).toContainText('这段文字必须保留');
-  await expect(page.locator('#prepList')).toContainText('待上传');
+  await expect(page.locator('#prepList')).toContainText('排队中');
+  const uploadKey = await page.evaluate(() => `attachments:${state.students[0].preparations[0].files[0].id}`);
+  await page.evaluate(key => handleFileStatus('正在上传讲义（42%）', { key, state: 'uploading', percent: 42, name: '讲义.pdf' }), uploadKey);
+  await expect(page.locator('#prepList .attachment-status')).toHaveText('上传 42%');
+  await expect(page.locator('#prepList .attachment-meter i')).toHaveAttribute('style', /42%/);
   await page.locator('#sidebarAuthButton').click();
   await expect(page.locator('#uploadQueue')).toContainText('讲义.pdf');
+  await expect(page.locator('#uploadQueue')).toContainText('上传 42%');
+  await expect(page.locator('#uploadQueue [role=progressbar]')).toHaveAttribute('aria-valuenow', '42');
   await page.locator('.cancel-upload').click();
   await expect(page.locator('#confirmDialog')).toHaveAttribute('open', '');
   await page.locator('#confirmAccept').click();

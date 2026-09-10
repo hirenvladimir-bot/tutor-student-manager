@@ -5,6 +5,7 @@
   const activeUploads = new Map();
   const uuid = () => crypto.randomUUID();
   const safeName = name => `file.${(name.match(/\.([a-z0-9]{1,12})$/i)?.[1] || 'bin').toLowerCase()}`;
+  const report = (message, detail) => onStatus(message, detail);
   function configure(options) { client = options.client; bucket = options.bucket; endpoint = options.endpoint; onStatus = options.onStatus || onStatus; }
   async function cacheFile(key, file) {
     try { await ZX.Database.put('blobs', { key, blob: file }); }
@@ -103,34 +104,46 @@
       return mutation;
     }
     if (!mutation.data.path && mutation.data.localBlobKey) {
-      const cached = await ZX.Database.get('blobs', mutation.data.localBlobKey);
-      if (!cached?.blob && !cached?.buffer && !cached?.dataUrl) throw new Error(`找不到待上传文件：${mutation.data.name}`);
-      const session = (await client.auth.getSession()).data.session;
-      const user = (await client.auth.getUser()).data.user;
-      if (!session || !user) throw new Error('需要登录后才能继续上传文件');
-      const section = mutation.data.ownerType === 'preparations' ? 'preparations' : 'course-progress';
-      const path = mutation.data.uploadPath || `${user.id}/${mutation.studentId}/${section}/${mutation.data.ownerId}/${uuid()}-${safeName(mutation.data.name)}`;
-      if (!mutation.data.uploadPath) {
-        mutation = { ...mutation, data: { ...mutation.data, uploadPath: path } };
+      const detail = { key: mutation.key, id: mutation.id, name: mutation.data.name, state: 'queued', percent: 0 };
+      try {
+        const cached = await ZX.Database.get('blobs', mutation.data.localBlobKey);
+        if (!cached?.blob && !cached?.buffer && !cached?.dataUrl) throw new Error(`找不到待上传文件：${mutation.data.name}`);
+        const session = (await client.auth.getSession()).data.session;
+        const user = (await client.auth.getUser()).data.user;
+        if (!session || !user) {
+          const error = new Error('需要登录后才能继续上传文件');
+          error.code = 'AUTH_REQUIRED';
+          throw error;
+        }
+        const section = mutation.data.ownerType === 'preparations' ? 'preparations' : 'course-progress';
+        const path = mutation.data.uploadPath || `${user.id}/${mutation.studentId}/${section}/${mutation.data.ownerId}/${uuid()}-${safeName(mutation.data.name)}`;
+        if (!mutation.data.uploadPath) {
+          mutation = { ...mutation, data: { ...mutation.data, uploadPath: path } };
+          await ZX.Database.applyServerRecord({ ...mutation, version: mutation.baseVersion, deletedAt: null });
+          await ZX.Database.put('outbox', mutation);
+        }
+        const source = cached.blob || (cached.buffer ? new Blob([cached.buffer], { type: cached.type || mutation.data.type }) : await (await fetch(cached.dataUrl)).blob());
+        report(`正在上传 ${mutation.data.name}（0%）`, { ...detail, state: 'uploading' });
+        await upload(source, path, session.access_token, percent => report(`正在上传 ${mutation.data.name}（${percent}%）`, { ...detail, state: 'uploading', percent }), mutation.key);
+        mutation = { ...mutation, data: { ...mutation.data, path, pending: false } };
+        delete mutation.data.localBlobKey;
+        delete mutation.data.uploadPath;
+        await ZX.Database.remove('blobs', cached.key);
         await ZX.Database.applyServerRecord({ ...mutation, version: mutation.baseVersion, deletedAt: null });
         await ZX.Database.put('outbox', mutation);
+        report(`${mutation.data.name} 已上传，正在同步附件记录`, { ...detail, state: 'syncing', percent: 100 });
+      } catch (error) {
+        const state = error.code === 'AUTH_REQUIRED' ? 'waiting-auth' : error.code === 'UPLOAD_CANCELLED' ? 'cancelled' : 'failed';
+        report(error.message || `上传 ${mutation.data.name} 失败`, { ...detail, state, error: error.message || String(error) });
+        throw error;
       }
-      const source = cached.blob || (cached.buffer ? new Blob([cached.buffer], { type: cached.type || mutation.data.type }) : await (await fetch(cached.dataUrl)).blob());
-      onStatus(`正在继续上传 ${mutation.data.name}（0%）`);
-      await upload(source, path, session.access_token, percent => onStatus(`正在继续上传 ${mutation.data.name}（${percent}%）`), mutation.key);
-      mutation = { ...mutation, data: { ...mutation.data, path, pending: false } };
-      delete mutation.data.localBlobKey;
-      delete mutation.data.uploadPath;
-      await ZX.Database.remove('blobs', cached.key);
-      await ZX.Database.applyServerRecord({ ...mutation, version: mutation.baseVersion, deletedAt: null });
-      await ZX.Database.put('outbox', mutation);
-      onStatus(`${mutation.data.name} 已上传，正在同步附件记录`);
     }
     return mutation;
   }
   async function afterApplied(applied, queued) {
     const keys = new Set((applied || []).map(item => item.key));
     for (const mutation of queued || []) {
+      if (keys.has(mutation.key) && mutation.entity === 'attachments' && mutation.operation !== 'delete') report(`${mutation.data.name} 已完成云端同步`, { key: mutation.key, id: mutation.id, name: mutation.data.name, state: 'complete', percent: 100 });
       if (keys.has(mutation.key) && mutation.entity === 'attachments' && mutation.operation === 'delete') await queueCleanup(mutation.data.path);
     }
     await processCleanup();

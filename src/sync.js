@@ -131,7 +131,7 @@
     await ZX.Files.processCleanup();
     await flush(); await pull();
   }
-  function schedule() { clearTimeout(schedule.timer); schedule.timer = setTimeout(sync, 900); }
+  function schedule() { clearTimeout(schedule.timer); schedule.timer = setTimeout(sync, 350); }
   root.addEventListener('online', () => { ZX.Files.processCleanup(); sync(); });
   root.addEventListener('offline', () => onStatus('offline'));
   ZX.Sync = { start, stop, sync, pull, flush, schedule, resolve, online };
