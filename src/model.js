@@ -57,19 +57,26 @@
       id: r.id, ...clone(r.data), _version: r.version, scores: [], preparations: [], courseProgress: [], custom: []
     }));
     const byId = new Map(students.map(s => [s.id, s]));
+    const owners = new Map();
     live.forEach(r => {
       const student = byId.get(r.studentId);
       if (!student) return;
       const item = { id: r.id, ...clone(r.data), _version: r.version };
       if (r.entity === 'scores') student.scores.push(item);
-      if (r.entity === 'preparations') student.preparations.push({ ...item, files: [] });
-      if (r.entity === 'course_progress') student.courseProgress.push({ ...item, files: [] });
+      if (r.entity === 'preparations') {
+        const owner = { ...item, files: [] };
+        student.preparations.push(owner);
+        owners.set(`preparations:${r.id}`, owner);
+      }
+      if (r.entity === 'course_progress') {
+        const owner = { ...item, files: [] };
+        student.courseProgress.push(owner);
+        owners.set(`course_progress:${r.id}`, owner);
+      }
       if (r.entity === 'custom_fields') student.custom.push(item);
     });
     live.filter(r => r.entity === 'attachments').forEach(r => {
-      const student = byId.get(r.studentId);
-      const list = r.data.ownerType === 'preparations' ? student?.preparations : student?.courseProgress;
-      const owner = list?.find(item => item.id === r.data.ownerId);
+      const owner = owners.get(`${r.data.ownerType}:${r.data.ownerId}`);
       if (owner) owner.files.push({ id: r.id, ...clone(r.data), _version: r.version });
     });
     return { students, activeId: byId.has(activeId) ? activeId : students[0]?.id || null, schemaVersion: 2 };

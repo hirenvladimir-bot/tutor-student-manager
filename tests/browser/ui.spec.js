@@ -113,7 +113,7 @@ test('an expired cached account is not presented as signed in', async ({ page })
 test('local interface becomes ready without waiting for cloud restoration', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true');
   const source = await page.locator('script[src*="app.js"]').getAttribute('src');
-  expect(source).toContain('v=44');
+  expect(source).toContain('v=45');
   const bootstrapSource = await page.evaluate(() => bootstrap.toString());
   expect(bootstrapSource).not.toContain('await restoreSession');
   expect(bootstrapSource).toContain('restoreSession().then');
@@ -151,6 +151,31 @@ test('free-form scores save and progress records can be edited', async ({ page }
   await page.getByRole('button', { name: '保存进度' }).click();
   await page.locator('.edit-course').click();
   await expect(page.locator('#courseDialog h2')).toHaveText('编辑进度');
+});
+
+test('invalid exam scores and download errors use in-app messages instead of native alerts', async ({ page }) => {
+  await page.getByRole('button', { name: '添加第一位学生' }).click();
+  await page.locator('[name=name]').fill('应用内提示测试');
+  await page.getByRole('button', { name: '保存档案' }).click();
+  await page.locator('#addScoreBtn').click();
+  await page.locator('#scoreForm [name=label]').fill('月考');
+  await page.locator('#scoreForm [name=date]').fill('2026-09-10');
+  await page.locator('#scoreForm [name=score]').fill('八十六');
+  let nativeDialog = false;
+  page.on('dialog', async dialog => { nativeDialog = true; await dialog.dismiss(); });
+  await page.getByRole('button', { name: '记录成绩', exact: true }).click();
+  await expect(page.locator('#scoreMessage')).toContainText('请输入有效的数字分数');
+  await expect(page.locator('#scoreDialog')).toHaveAttribute('open', '');
+  await page.locator('#cancelScoreDialog').click();
+  await expect(page.locator('#confirmDialog')).toHaveAttribute('open', '');
+  await page.locator('#confirmAccept').click();
+  await page.evaluate(() => {
+    active().preparations = [{ id: crypto.randomUUID(), title: '旧附件', content: '', date: '9/10', files: [{ id: crypto.randomUUID(), name: '缺失.pdf' }] }];
+    render();
+  });
+  await page.locator('.prep-file').click();
+  await expect(page.locator('#appToast')).toContainText('下载失败');
+  expect(nativeDialog).toBe(false);
 });
 
 test('custom information deletes immediately without a confirmation dialog', async ({ page }) => {

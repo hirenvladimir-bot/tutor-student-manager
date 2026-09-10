@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>知行 · 家教学生管理</title>
   <link rel="stylesheet" href="style.css" />
-  <link rel="stylesheet" href="ui-overrides.css?v=15" />
+  <link rel="stylesheet" href="ui-overrides.css?v=16" />
 </head>
 <body>
   <main class="app-shell">
@@ -87,7 +87,7 @@
 
   <dialog id="studentDialog" class="modal"><form method="dialog" id="studentForm"><div class="modal-head"><div><span class="section-kicker">学生资料</span><h2 id="studentDialogTitle">添加学生</h2></div><button type="button" class="close" id="closeStudentDialog">×</button></div><div class="form-grid"><label>姓名<input name="name" required placeholder="例如：林小雨" /></label><label>就读学校<input name="school" placeholder="例如：育才中学" /></label><label>目标学校<input name="targetSchool" placeholder="例如：市实验中学" /></label><label>目前分数<input name="currentScore" type="text" placeholder="例如：82/100、待测" /></label><label>目标分数<input name="targetScore" type="text" placeholder="例如：90 分、120/150" /></label></div><div class="modal-actions"><button type="button" id="cancelStudentDialog" class="outline-btn">取消</button><button class="primary-btn" value="default">保存档案</button></div></form></dialog>
 
-  <dialog id="scoreDialog" class="modal compact"><form method="dialog" id="scoreForm"><div class="modal-head"><div><span class="section-kicker">考试记录</span><h2>添加成绩</h2></div><button class="close" value="cancel">×</button></div><div class="form-grid one-col"><label>考试名称<input name="label" required placeholder="例如：九月月考" /></label><label>考试日期<input name="date" type="date" required /></label><label>分数<input name="score" required type="text" inputmode="decimal" placeholder="例如：86 或 86.5" /></label></div><div class="modal-actions"><button value="cancel" class="outline-btn">取消</button><button class="primary-btn" value="default">记录成绩</button></div></form></dialog>
+  <dialog id="scoreDialog" class="modal compact"><form method="dialog" id="scoreForm"><div class="modal-head"><div><span class="section-kicker">考试记录</span><h2>添加成绩</h2></div><button type="button" class="close" id="closeScoreDialog">×</button></div><div class="form-grid one-col"><label>考试名称<input name="label" required placeholder="例如：九月月考" /></label><label>考试日期<input name="date" type="date" required /></label><label>分数<input name="score" required type="text" inputmode="decimal" placeholder="例如：86 或 86.5" /></label></div><p class="form-message" id="scoreMessage" aria-live="polite"></p><div class="modal-actions"><button type="button" id="cancelScoreDialog" class="outline-btn">取消</button><button class="primary-btn" value="default">记录成绩</button></div></form></dialog>
 
   <dialog id="customDialog" class="modal compact"><form method="dialog" id="customForm"><div class="modal-head"><div><span class="section-kicker">扩展档案</span><h2>添加信息</h2></div><button type="button" class="close" id="closeCustomDialog">×</button></div><div class="form-grid one-col"><label>字段名称<input name="key" required placeholder="例如：家长联系方式" /></label><label>内容<input name="value" required placeholder="例如：138 0000 0000" /></label></div><div class="modal-actions"><button type="button" id="cancelCustomDialog" class="outline-btn">取消</button><button class="primary-btn" value="default">添加</button></div></form></dialog>
 
@@ -99,12 +99,13 @@
 
   <dialog id="cloudDialog" class="modal compact"><form method="dialog" id="cloudForm"><div class="modal-head"><div><span class="section-kicker">账号同步</span><h2 id="authTitle">登录云端</h2></div><button type="button" class="close" id="closeCloudDialog">×</button></div><p class="helper">使用邮箱和密码登录。你的档案将只对当前账号可见，并自动同步到其他已登录设备。</p><div class="form-grid one-col"><label>邮箱<input name="email" type="email" required autocomplete="username email" placeholder="name@example.com" /></label><label>密码<input name="password" type="password" required minlength="6" autocomplete="current-password" placeholder="至少 6 位" /></label><label class="switch-row"><input name="auto" type="checkbox" checked /> 修改后自动同步</label></div><p class="auth-message" id="authMessage" aria-live="polite"></p><button type="button" class="text-btn" id="resendConfirmBtn">没有收到确认邮件？重新发送</button><div class="modal-actions"><button type="button" class="text-btn logout-btn" id="logoutBtn" hidden>退出账号</button><button type="button" class="text-btn" id="authModeBtn">没有账号？注册</button><span class="modal-spacer"></span><button type="button" id="cancelCloudDialog" class="outline-btn">取消</button><button class="primary-btn" value="default" id="authSubmitBtn">登录并同步</button></div></form></dialog>
   <dialog id="confirmDialog" class="modal confirm-modal"><form method="dialog"><div class="confirm-symbol">?</div><h2 id="confirmTitle">请确认</h2><p id="confirmMessage"></p><div class="modal-actions"><button class="outline-btn" value="cancel">取消</button><button class="primary-btn" value="confirm" id="confirmAccept">确认</button></div></form></dialog>
+  <div id="appToast" class="app-toast" role="status" aria-live="polite" hidden></div>
   <script src="vendor/supabase.min.js"></script>
   <script src="vendor/tus.min.js"></script>
-  <script src="src/model.js?v=2"></script>
+  <script src="src/model.js?v=3"></script>
   <script src="src/database.js?v=3"></script>
   <script src="src/files.js?v=9"></script>
 <script src="src/sync.js?v=9"></script>
-  <script src="app.js?v=44"></script>
+  <script src="app.js?v=45"></script>
 </body>
 </html>

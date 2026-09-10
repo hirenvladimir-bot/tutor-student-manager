@@ -57,3 +57,18 @@ test('diff isolates record edits and creates tombstones for deletions', () => {
   const deletes = Model.diff(before, Model.flatten(changed));
   assert.equal(deletes.find(x => x.entity === 'scores').operation, 'delete');
 });
+
+test('hydrate associates large attachment sets without repeatedly scanning owner lists', () => {
+  const studentId = '11111111-1111-4111-8111-111111111111';
+  const records = new Map();
+  records.set(`students:${studentId}`, { entity: 'students', id: studentId, studentId: null, data: { name: '性能测试' }, version: 1 });
+  for (let index = 0; index < 3000; index++) {
+    const ownerId = `prep-${index}`;
+    records.set(`preparations:${ownerId}`, { entity: 'preparations', id: ownerId, studentId, data: { title: ownerId }, version: 1 });
+    records.set(`attachments:file-${index}`, { entity: 'attachments', id: `file-${index}`, studentId, data: { ownerType: 'preparations', ownerId, name: `${index}.pdf` }, version: 1 });
+  }
+  const start = performance.now();
+  const restored = Model.hydrate(records, studentId);
+  assert.equal(restored.students[0].preparations[2999].files[0].name, '2999.pdf');
+  assert.ok(performance.now() - start < 500, 'large attachment hydration should remain linear and fast');
+});
