@@ -115,7 +115,7 @@ test('an expired cached account is not presented as signed in', async ({ page })
 test('local interface becomes ready without waiting for cloud restoration', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true');
   const source = await page.locator('script[src*="app.js"]').getAttribute('src');
-  expect(source).toContain('v=49');
+  expect(source).toContain('v=50');
   const bootstrapSource = await page.evaluate(() => bootstrap.toString());
   expect(bootstrapSource).not.toContain('await restoreSession');
   expect(bootstrapSource).toContain('restoreSession().then');
@@ -278,6 +278,43 @@ test('offline attachment is queued without losing preparation text', async ({ pa
   await expect(page.locator('#uploadQueue')).toBeHidden();
   await expect(page.locator('#prepList')).not.toContainText('讲义.pdf');
   expect(await page.evaluate(() => Zhixing.Database.all('blobs').then(items => items.length))).toBe(0);
+});
+
+test('files dragged from a desktop app are added to preparation and course editors', async ({ page }) => {
+  await page.getByRole('button', { name: '添加第一位学生' }).click();
+  await page.locator('[name=name]').fill('微信拖拽测试');
+  await page.getByRole('button', { name: '保存档案' }).click();
+
+  const dropFile = async (selector, name, contents) => page.locator(selector).evaluate((zone, payload) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([payload.contents], payload.name, { type: 'application/pdf', lastModified: 123456 }));
+    for (const type of ['dragenter', 'dragover', 'drop']) {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'dataTransfer', { value: transfer });
+      zone.dispatchEvent(event);
+    }
+  }, { name, contents });
+
+  await page.locator('#addPrepBtn').click();
+  await page.locator('#prepForm [name=title]').fill('微信备课资料');
+  await dropFile('#prepDropZone', '微信讲义.pdf', 'wechat-preparation');
+  await dropFile('#prepDropZone', '微信讲义.pdf', 'wechat-preparation');
+  await expect(page.locator('#prepDropZone')).toHaveClass(/has-files/);
+  await expect(page.locator('#prepFilesHint')).toContainText('共 1 个待保存');
+  await page.getByRole('button', { name: '保存备课' }).click();
+  await expect(page.locator('#prepList')).toContainText('微信讲义.pdf');
+
+  await page.locator('#addCourseBtn').click();
+  await page.locator('#courseItemForm [name=title]').fill('微信进度资料');
+  await dropFile('#courseDropZone', '微信作业.pdf', 'wechat-course');
+  await expect(page.locator('#courseFilesHint')).toContainText('共 1 个待保存');
+  await page.getByRole('button', { name: '保存进度' }).click();
+  await expect(page.locator('#courseList')).toContainText('微信作业.pdf');
+
+  const records = await page.evaluate(async () => { await persistQueue; const saved = await Zhixing.Database.state(); return { prep: saved.students[0].preparations[0].files[0], course: saved.students[0].courseProgress[0].files[0], blobs: (await Zhixing.Database.all('blobs')).length }; });
+  expect(records.prep).toMatchObject({ name: '微信讲义.pdf', pending: true });
+  expect(records.course).toMatchObject({ name: '微信作业.pdf', pending: true });
+  expect(records.blobs).toBe(2);
 });
 
 test('attachment cache failure keeps preparation text in the editor and avoids a native alert', async ({ page }) => {
