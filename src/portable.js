@@ -8,6 +8,11 @@
   const fileSummary = (files, bullet) => (files || []).map(file =>
     `${bullet}附件：${file.relativePath || file.name}${file.path ? `｜路径：${file.path}` : ''}｜类型：${file.type || 'application/octet-stream'}｜大小：${Number(file.size || 0)}`
   ).join('\n');
+  const noteLines = (student, field, label, bullet) => {
+    const entries = student[`${field}Entries`];
+    if (Array.isArray(entries) && entries.length) return entries.map(item => `${bullet}${label}｜${item.createdAt}｜${item.text}`).join('\n');
+    return `${bullet}${label}：${student[field] || ''}`;
+  };
 
   function studentText(student, plain = false) {
     const bullet = plain ? '' : '- ';
@@ -19,7 +24,7 @@
       : `| ${item.date} | ${item.label} | ${item.score} |`
     ).join('\n') || `${bullet}暂无`;
     const custom = (student.custom || []).map(item => `${bullet}${item.key}：${item.value}`).join('\n') || `${bullet}暂无`;
-    return `${plain ? '学生：' : '## '}${student.name}\n${bullet}就读学校：${student.school || ''}\n${bullet}目标学校：${student.targetSchool || ''}\n${bullet}目前分数：${student.currentScore ?? ''}\n${bullet}目标分数：${student.targetScore ?? ''}\n\n${plain ? '考试成绩：' : '### 考试成绩'}\n${plain ? '日期｜考试｜分数\n' : ''}${scores}\n\n${plain ? '备课记录：' : '### 备课记录'}\n${records(student.preparations, '暂无')}\n\n${plain ? '课程进度：' : '### 课程进度'}\n${records(student.courseProgress, '暂无')}\n\n${plain ? '教学备忘：' : '### 教学备忘'}\n${bullet}下节课要讲的内容：${student.nextLesson || ''}\n${bullet}着重要听的内容：${student.focusContent || ''}\n\n${plain ? '其他信息：' : '### 其他信息'}\n${custom}`;
+    return `${plain ? '学生：' : '## '}${student.name}\n${bullet}就读学校：${student.school || ''}\n${bullet}目标学校：${student.targetSchool || ''}\n${bullet}目前分数：${student.currentScore ?? ''}\n${bullet}目标分数：${student.targetScore ?? ''}\n\n${plain ? '考试成绩：' : '### 考试成绩'}\n${plain ? '日期｜考试｜分数\n' : ''}${scores}\n\n${plain ? '备课记录：' : '### 备课记录'}\n${records(student.preparations, '暂无')}\n\n${plain ? '课程进度：' : '### 课程进度'}\n${records(student.courseProgress, '暂无')}\n\n${plain ? '教学备忘：' : '### 教学备忘'}\n${noteLines(student, 'nextLesson', '下节课要讲的内容', bullet)}\n${noteLines(student, 'focusContent', '着重要听的内容', bullet)}\n\n${plain ? '其他信息：' : '### 其他信息'}\n${custom}`;
   }
 
   function encode(state) {
@@ -45,7 +50,7 @@
     const blocks = text.split(/(?:^|\n)(?:##\s+|学生[：:])/).slice(1);
     const students = blocks.map(block => {
       const lines = block.split('\n').map(value => value.trim()).filter(Boolean);
-      const student = { id: root.crypto.randomUUID(), name: (lines.shift() || '未命名学生').replace(/^#+\s*/, '').trim(), school: '', targetSchool: '', currentScore: null, targetScore: null, scores: [], custom: [], courseProgress: [], preparations: [], nextLesson: '', focusContent: '' };
+      const student = { id: root.crypto.randomUUID(), name: (lines.shift() || '未命名学生').replace(/^#+\s*/, '').trim(), school: '', targetSchool: '', currentScore: null, targetScore: null, scores: [], custom: [], courseProgress: [], preparations: [], nextLesson: '', focusContent: '', nextLessonEntries: [], focusContentEntries: [] };
       let section = 'profile', lastRecord = null;
       const addRecord = (list, clean) => {
         const match = clean.match(/^(.+?)[：:]\s*(.*)$/), date = match?.[1] || '', raw = match?.[2] || clean;
@@ -86,6 +91,12 @@
         }
         if (section === 'preparations') { addRecord(student.preparations, clean); continue; }
         if (section === 'course') { addRecord(student.courseProgress, clean); continue; }
+        const timedNote = clean.match(/^(下节课要讲的内容|着重要听的内容)｜([^｜]+)｜(.+)$/);
+        if (section === 'notes' && timedNote) {
+          const field = timedNote[1] === '下节课要讲的内容' ? 'nextLesson' : 'focusContent';
+          student[`${field}Entries`].push({ id: root.crypto.randomUUID(), createdAt: timedNote[2].trim(), text: timedNote[3].trim() });
+          continue;
+        }
         const pairs = [['就读学校', 'school'], ['目标学校', 'targetSchool'], ['目前分数', 'currentScore'], ['目标分数', 'targetScore'], ['下节课要讲的内容', 'nextLesson'], ['着重要听的内容', 'focusContent']];
         let matched = false;
         for (const [label, key] of pairs) {

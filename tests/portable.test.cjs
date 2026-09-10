@@ -26,3 +26,16 @@ test('portable module parses readable text after the embedded backup is removed'
   assert.equal(restored.courseProgress[0].title, '进度');
   assert.equal(restored.custom[0].value, '人教版');
 });
+
+test('timestamped teaching notes survive readable Markdown export and import', () => {
+  const timed = structuredClone(fixture);
+  timed.students[0].nextLesson = '';
+  timed.students[0].focusContent = '';
+  timed.students[0].nextLessonEntries = [{ id: 'note-a', text: '二次函数图像', createdAt: '2026-09-10T08:30:00.000Z' }];
+  timed.students[0].focusContentEntries = [{ id: 'note-b', text: '先圈关键词', createdAt: '2026-09-10T09:00:00.000Z' }];
+  const readable = Portable.markdown(timed, true).replace(/\n\n\[\[ZHIXING_V2:[A-Za-z0-9+/=]+\]\]\s*$/, '');
+  const restored = Portable.parse(readable).students[0];
+  assert.equal(restored.nextLessonEntries[0].text, '二次函数图像');
+  assert.equal(restored.nextLessonEntries[0].createdAt, '2026-09-10T08:30:00.000Z');
+  assert.equal(restored.focusContentEntries[0].text, '先圈关键词');
+});

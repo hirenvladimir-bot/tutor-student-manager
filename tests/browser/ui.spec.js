@@ -115,7 +115,7 @@ test('an expired cached account is not presented as signed in', async ({ page })
 test('local interface becomes ready without waiting for cloud restoration', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true');
   const source = await page.locator('script[src*="app.js"]').getAttribute('src');
-  expect(source).toContain('v=52');
+  expect(source).toContain('v=53');
   const bootstrapSource = await page.evaluate(() => bootstrap.toString());
   expect(bootstrapSource).not.toContain('await restoreSession');
   expect(bootstrapSource).toContain('restoreSession().then');
@@ -177,6 +177,34 @@ test('overview profile fields support quick editing and local persistence', asyn
   expect(stored).toMatchObject({ currentScore: '阶段待测', school: '青冈八中', targetSchool: '东北农业大学', targetScore: 'A 档' });
   await expect(page.locator('#targetScoreUnit')).toBeHidden();
   expect(await page.evaluate(() => Zhixing.Database.stats().then(stats => stats.pending))).toBeGreaterThan(0);
+});
+
+test('lesson and focus notes support fast timestamped entries, editing and deletion', async ({ page }) => {
+  await page.getByRole('button', { name: '添加第一位学生' }).click();
+  await page.locator('#studentForm [name=name]').fill('时间记录测试');
+  await page.getByRole('button', { name: '保存档案' }).click();
+  await page.locator('#nextLessonQuickForm [name=text]').fill('二次函数图像');
+  await page.locator('#nextLessonQuickForm button').click();
+  await page.locator('#focusContentQuickForm [name=text]').fill('审题与定义域');
+  await page.locator('#focusContentQuickForm button').click();
+  await expect(page.locator('#nextLessonList .timed-note-item')).toHaveCount(1);
+  await expect(page.locator('#focusContentList .timed-note-item')).toHaveCount(1);
+  await expect(page.locator('#nextLessonList time')).toContainText(String(new Date().getFullYear()));
+  await page.locator('#nextLessonList .edit-timed-note').click();
+  await page.locator('#noteEditForm [name=text]').fill('二次函数图像与性质');
+  await page.locator('#noteEditForm [name=createdAt]').fill('2026-09-09T08:30');
+  await page.locator('#noteEditForm button[value=default]').click();
+  await expect(page.locator('#nextLessonList')).toContainText('二次函数图像与性质');
+  await expect(page.locator('#nextLessonList')).toContainText('2026');
+  await page.locator('#focusContentList .remove-timed-note').click();
+  await expect(page.locator('#focusContentList .timed-note-item')).toHaveCount(0);
+  const stored = await page.evaluate(async () => {
+    await persistQueue;
+    const data = await Zhixing.Database.state(), record = await Zhixing.Database.get('outbox', `students:${active().id}`);
+    return { entries: data.students[0].nextLessonEntries, encoded: record.data.nextLesson };
+  });
+  expect(stored.entries[0]).toMatchObject({ text: '二次函数图像与性质' });
+  expect(stored.encoded).toContain('[[ZHIXING_NOTES_V1]]');
 });
 
 test('every saved edit schedules cloud sync and exposes live status', async ({ page }) => {
@@ -246,11 +274,11 @@ test('rapid local saves are serialized and retain the newest value', async ({ pa
   await page.getByRole('button', { name: '保存档案' }).click();
   const result = await page.evaluate(async () => {
     const studentId = active().id, tasks = [];
-    for (let index = 0; index < 25; index++) { active().nextLesson = `最终值-${index}`; tasks.push(save()); }
+    for (let index = 0; index < 25; index++) { active().school = `最终值-${index}`; tasks.push(save()); }
     await Promise.all(tasks);
     const record = await window.Zhixing.Database.get('outbox', `students:${studentId}`);
     const stored = await window.Zhixing.Database.state();
-    return { queued: record.data.nextLesson, stored: stored.students[0].nextLesson, local: JSON.parse(localStorage.getItem(storeKey)).students[0].nextLesson };
+    return { queued: record.data.school, stored: stored.students[0].school, local: JSON.parse(localStorage.getItem(storeKey)).students[0].school };
   });
   expect(result).toEqual({ queued: '最终值-24', stored: '最终值-24', local: '最终值-24' });
 });

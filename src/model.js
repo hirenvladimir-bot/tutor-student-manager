@@ -4,8 +4,16 @@
   const entityOrder = ['students', 'scores', 'preparations', 'course_progress', 'custom_fields', 'attachments'];
   const clone = value => JSON.parse(JSON.stringify(value));
   const uuid = () => root.crypto?.randomUUID?.() || `zx-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const notePrefix = '[[ZHIXING_NOTES_V1]]';
   const own = (obj, keys) => Object.fromEntries(keys.map(k => [k, obj?.[k] ?? (k.endsWith('Score') ? null : '')]));
   const attachmentData = (file, ownerType, ownerId) => ({ ownerType, ownerId, name: file.name || '未命名文件', relativePath: file.relativePath || '', type: file.type || 'application/octet-stream', size: Number(file.size || 0), path: file.path || '', uploadPath: file.uploadPath || '', data: file.data || '', pending: Boolean(file.pending), localBlobKey: file.localBlobKey || '' });
+  function decodeNoteEntries(value) {
+    if (typeof value !== 'string' || !value.startsWith(notePrefix)) return null;
+    try { const parsed = JSON.parse(value.slice(notePrefix.length)); return Array.isArray(parsed) ? parsed : []; }
+    catch { return []; }
+  }
+  function encodeNoteEntries(entries, legacy = '') { return Array.isArray(entries) ? `${notePrefix}${JSON.stringify(entries)}` : (legacy || ''); }
+  function normalizeNoteEntries(entries) { return (Array.isArray(entries) ? entries : []).map(item => ({ id: item.id || uuid(), text: String(item.text || '').trim(), createdAt: item.createdAt || new Date().toISOString() })).filter(item => item.text); }
 
   function ensureIds(state) {
     const next = clone(state || { students: [], activeId: null });
@@ -16,6 +24,8 @@
       student.preparations = Array.isArray(student.preparations) ? student.preparations : [];
       student.courseProgress = Array.isArray(student.courseProgress) ? student.courseProgress : [];
       student.custom = Array.isArray(student.custom) ? student.custom : [];
+      if (Array.isArray(student.nextLessonEntries)) student.nextLessonEntries = normalizeNoteEntries(student.nextLessonEntries);
+      if (Array.isArray(student.focusContentEntries)) student.focusContentEntries = normalizeNoteEntries(student.focusContentEntries);
       student.scores.forEach(item => item.id ||= uuid());
       student.preparations.forEach(item => item.id ||= uuid());
       student.courseProgress.forEach(item => item.id ||= uuid());
@@ -36,7 +46,10 @@
       key: `${entity}:${id}`, entity, id, studentId: studentId || null, data: clone(data), version: Number(version || 0), deletedAt
     });
     ensureIds(state).students.forEach(student => {
-      put('students', student.id, null, own(student, ['name', 'school', 'targetSchool', 'currentScore', 'targetScore', 'nextLesson', 'focusContent']), student._version);
+      const profile = own(student, ['name', 'school', 'targetSchool', 'currentScore', 'targetScore']);
+      profile.nextLesson = encodeNoteEntries(student.nextLessonEntries, student.nextLesson);
+      profile.focusContent = encodeNoteEntries(student.focusContentEntries, student.focusContent);
+      put('students', student.id, null, profile, student._version);
       student.scores.forEach(item => put('scores', item.id, student.id, own(item, ['label', 'date', 'score']), item._version));
       student.preparations.forEach(item => {
         put('preparations', item.id, student.id, own(item, ['title', 'content', 'date']), item._version);
@@ -53,9 +66,12 @@
 
   function hydrate(records, activeId = null) {
     const live = [...records.values()].filter(r => !r.deletedAt);
-    const students = live.filter(r => r.entity === 'students').map(r => ({
-      id: r.id, ...clone(r.data), _version: r.version, scores: [], preparations: [], courseProgress: [], custom: []
-    }));
+    const students = live.filter(r => r.entity === 'students').map(r => {
+      const data = clone(r.data), nextLessonEntries = decodeNoteEntries(data.nextLesson), focusContentEntries = decodeNoteEntries(data.focusContent);
+      if (nextLessonEntries) { data.nextLessonEntries = normalizeNoteEntries(nextLessonEntries); data.nextLesson = ''; }
+      if (focusContentEntries) { data.focusContentEntries = normalizeNoteEntries(focusContentEntries); data.focusContent = ''; }
+      return { id: r.id, ...data, _version: r.version, scores: [], preparations: [], courseProgress: [], custom: [] };
+    });
     const byId = new Map(students.map(s => [s.id, s]));
     const owners = new Map();
     live.forEach(r => {
@@ -97,5 +113,5 @@
     return changes;
   }
 
-  ZX.Model = { entityOrder, clone, ensureIds, flatten, hydrate, diff };
+  ZX.Model = { entityOrder, clone, ensureIds, flatten, hydrate, diff, decodeNoteEntries, encodeNoteEntries, normalizeNoteEntries };
 })(window);

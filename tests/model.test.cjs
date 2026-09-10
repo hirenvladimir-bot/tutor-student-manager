@@ -34,6 +34,17 @@ test('flatten and hydrate retain every existing entity and attachment', () => {
   assert.equal(restored.students[0].targetScore, '120/150');
 });
 
+test('timestamped teaching notes are encoded into compatible text columns', () => {
+  const original = fixture();
+  original.students[0].nextLesson = '';
+  original.students[0].nextLessonEntries = [{ id: 'note-a', text: '函数复习', createdAt: '2026-09-10T08:30:00.000Z' }];
+  const records = Model.flatten(original);
+  assert.match(records.get('students:11111111-1111-4111-8111-111111111111').data.nextLesson, /^\[\[ZHIXING_NOTES_V1\]\]/);
+  const restored = Model.hydrate(records, original.activeId);
+  assert.equal(restored.students[0].nextLessonEntries[0].text, '函数复习');
+  assert.equal(restored.students[0].nextLessonEntries[0].createdAt, '2026-09-10T08:30:00.000Z');
+});
+
 test('legacy data-url attachments survive v2 normalization', () => {
   const original = fixture();
   original.students[0].preparations[0].files[0] = { id: '55555555-5555-4555-8555-555555555555', name: '旧讲义.txt', type: 'text/plain', data: 'data:text/plain;base64,5YaF5a65' };

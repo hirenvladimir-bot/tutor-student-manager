@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>知行 · 家教学生管理</title>
   <link rel="stylesheet" href="style.css" />
-  <link rel="stylesheet" href="ui-overrides.css?v=19" />
+  <link rel="stylesheet" href="ui-overrides.css?v=20" />
 </head>
 <body>
   <main class="app-shell">
@@ -54,10 +54,10 @@
             </section>
 
             <section class="card notes-card">
-              <div class="section-head"><div><span class="section-kicker">教学备忘</span><h2>课程重点</h2></div><button class="text-btn" id="saveNotesBtn">保存更改</button></div>
+              <div class="section-head"><div><span class="section-kicker">教学备忘</span><h2>课程重点</h2></div><span class="note-auto-hint">添加后自动保存时间</span></div>
               <div class="note-grid">
-                <label>下节课要讲的内容<textarea id="nextLesson" placeholder="例如：二次函数的图像与性质"></textarea></label>
-                <label>着重要听的内容<textarea id="focusContent" placeholder="例如：审题习惯、函数定义域"></textarea></label>
+                <section class="timed-note-panel"><h3>下节课要讲的内容</h3><form class="note-quick-add" id="nextLessonQuickForm"><input name="text" required maxlength="500" autocomplete="off" placeholder="例如：二次函数的图像与性质" /><button type="submit">＋ 添加</button></form><div class="timed-note-list" id="nextLessonList"></div></section>
+                <section class="timed-note-panel"><h3>着重要听的内容</h3><form class="note-quick-add" id="focusContentQuickForm"><input name="text" required maxlength="500" autocomplete="off" placeholder="例如：审题习惯、函数定义域" /><button type="submit">＋ 添加</button></form><div class="timed-note-list" id="focusContentList"></div></section>
               </div>
             </section>
 
@@ -89,6 +89,8 @@
 
   <dialog id="quickEditDialog" class="modal compact quick-edit-dialog"><form method="dialog" id="quickEditForm"><div class="modal-head"><div><span class="section-kicker">快捷修改</span><h2 id="quickEditTitle">修改信息</h2></div><button type="button" class="close" id="closeQuickEditDialog">×</button></div><div class="form-grid one-col"><label><span id="quickEditLabel">内容</span><input name="value" type="text" autocomplete="off" /></label></div><p class="helper">可自由输入文字或数字；留空可清除此项。</p><div class="modal-actions"><button type="button" id="cancelQuickEditDialog" class="outline-btn">取消</button><button class="primary-btn" value="default">保存修改</button></div></form></dialog>
 
+  <dialog id="noteEditDialog" class="modal compact"><form method="dialog" id="noteEditForm"><div class="modal-head"><div><span class="section-kicker">教学备忘</span><h2>编辑记录</h2></div><button type="button" class="close" id="closeNoteEditDialog">×</button></div><div class="form-grid one-col"><label>记录内容<input name="text" required maxlength="500" autocomplete="off" /></label><label>记录时间<input name="createdAt" type="datetime-local" required /></label></div><div class="modal-actions"><button type="button" id="cancelNoteEditDialog" class="outline-btn">取消</button><button class="primary-btn" value="default">保存修改</button></div></form></dialog>
+
   <dialog id="scoreDialog" class="modal compact"><form method="dialog" id="scoreForm"><div class="modal-head"><div><span class="section-kicker">考试记录</span><h2>添加成绩</h2></div><button type="button" class="close" id="closeScoreDialog">×</button></div><div class="form-grid one-col"><label>考试名称<input name="label" required placeholder="例如：九月月考" /></label><label>考试日期<input name="date" type="date" required /></label><label>分数<input name="score" required type="text" inputmode="decimal" placeholder="例如：86 或 86.5" /></label></div><p class="form-message" id="scoreMessage" aria-live="polite"></p><div class="modal-actions"><button type="button" id="cancelScoreDialog" class="outline-btn">取消</button><button class="primary-btn" value="default">记录成绩</button></div></form></dialog>
 
   <dialog id="customDialog" class="modal compact"><form method="dialog" id="customForm"><div class="modal-head"><div><span class="section-kicker">扩展档案</span><h2>添加信息</h2></div><button type="button" class="close" id="closeCustomDialog">×</button></div><div class="form-grid one-col"><label>字段名称<input name="key" required placeholder="例如：家长联系方式" /></label><label>内容<input name="value" required placeholder="例如：138 0000 0000" /></label></div><div class="modal-actions"><button type="button" id="cancelCustomDialog" class="outline-btn">取消</button><button class="primary-btn" value="default">添加</button></div></form></dialog>
@@ -104,11 +106,11 @@
   <div id="appToast" class="app-toast" role="status" aria-live="polite" hidden></div>
   <script src="vendor/supabase.min.js"></script>
   <script src="vendor/tus.min.js"></script>
-  <script src="src/model.js?v=3"></script>
+  <script src="src/model.js?v=4"></script>
   <script src="src/database.js?v=4"></script>
   <script src="src/files.js?v=10"></script>
   <script src="src/sync.js?v=11"></script>
-  <script src="src/portable.js?v=1"></script>
-  <script src="app.js?v=52"></script>
+  <script src="src/portable.js?v=2"></script>
+  <script src="app.js?v=53"></script>
 </body>
 </html>
