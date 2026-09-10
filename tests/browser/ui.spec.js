@@ -104,6 +104,8 @@ test('blank student form closes without native validation', async ({ page }) => 
 test('an expired cached account is not presented as signed in', async ({ page }) => {
   await page.evaluate(() => localStorage.setItem('zhixing-tutor-cloud-v1', JSON.stringify({ auto: true, userEmail: 'stale@example.com', lastSync: new Date().toISOString() })));
   await page.reload();
+  await expect(page.locator('#emptyLoginButton')).toBeVisible();
+  await expect(page.locator('#emptyLoginButton')).toHaveText('登录并同步');
   await expect(page.locator('#sidebarStorageText')).toHaveText('数据仅保存于此浏览器');
   await page.evaluate(() => openDataCenter());
   await expect(page.locator('#cloudCheckBtn')).toBeHidden();
@@ -113,7 +115,7 @@ test('an expired cached account is not presented as signed in', async ({ page })
 test('local interface becomes ready without waiting for cloud restoration', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true');
   const source = await page.locator('script[src*="app.js"]').getAttribute('src');
-  expect(source).toContain('v=48');
+  expect(source).toContain('v=49');
   const bootstrapSource = await page.evaluate(() => bootstrap.toString());
   expect(bootstrapSource).not.toContain('await restoreSession');
   expect(bootstrapSource).toContain('restoreSession().then');
