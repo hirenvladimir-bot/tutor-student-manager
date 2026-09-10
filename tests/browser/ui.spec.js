@@ -113,7 +113,7 @@ test('an expired cached account is not presented as signed in', async ({ page })
 test('local interface becomes ready without waiting for cloud restoration', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true');
   const source = await page.locator('script[src*="app.js"]').getAttribute('src');
-  expect(source).toContain('v=46');
+  expect(source).toContain('v=47');
   const bootstrapSource = await page.evaluate(() => bootstrap.toString());
   expect(bootstrapSource).not.toContain('await restoreSession');
   expect(bootstrapSource).toContain('restoreSession().then');
@@ -473,6 +473,26 @@ test('large failed upload queues stay bounded and can be retried in bulk', async
   const overflow = await page.locator('#dataDialog').evaluate(dialog => dialog.scrollWidth > dialog.clientWidth);
   expect(overflow).toBeFalsy();
   await page.locator('#retryFailedUploads').click();
-  await expect(page.locator('#dataMessage')).toContainText('45 个失败附件');
+  await expect(page.locator('#dataMessage')).toContainText('45 个失败项目');
   expect(await page.evaluate(() => Zhixing.Database.all('outbox').then(items => items.every(item => item.attempts === 0)))).toBeTruthy();
+});
+
+test('failed record synchronization is visible and cannot report a false success', async ({ page }) => {
+  await page.evaluate(async () => {
+    const id = '98888888-8888-4888-8888-888888888888';
+    await Zhixing.Database.put('outbox', { key: `students:${id}`, entity: 'students', id, data: { name: '失败的学生记录' }, baseVersion: 0, operation: 'upsert', attempts: 6, lastError: '版本接口拒绝' });
+    cloud.userEmail = 'sync@example.com';
+    syncEngine = 'v2';
+    supabaseClient.auth.getUser = async () => ({ data: { user: { id: 'sync-user' } } });
+    Zhixing.Sync.flush = async () => {};
+    Zhixing.Sync.sync = async () => false;
+    document.querySelector('#dataDialog').showModal();
+    await renderSyncStatus();
+  });
+  await expect(page.locator('#uploadQueue')).toContainText('1 条记录同步失败');
+  await expect(page.locator('#uploadQueue')).toContainText('失败的学生记录');
+  await expect(page.locator('#uploadQueue')).toContainText('版本接口拒绝');
+  await page.locator('#pushBtn').click();
+  await expect(page.locator('#dataMessage')).toContainText('同步未完成：1 个项目同步失败');
+  await expect(page.locator('#dataMessage')).not.toContainText('本机更改已同步');
 });

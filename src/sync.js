@@ -91,7 +91,7 @@
 
   async function sync() {
     if (!userId || !online()) { onStatus('offline'); return false; }
-    try { await flush(); await pull(); await writeLegacySnapshot(); onStatus('online'); const conflictKeys=new Set((await ZX.Database.all('conflicts')).map(item=>item.key));const retryable=(await ZX.Database.all('outbox')).some(item=>(item.attempts||0)<MAX_ATTEMPTS&&!conflictKeys.has(item.key));if(retryable){clearTimeout(schedule.timer);schedule.timer=setTimeout(sync,1200);} return true; }
+    try { await flush(); await pull(); await writeLegacySnapshot(); const stats=await ZX.Database.stats();const conflictKeys=new Set((await ZX.Database.all('conflicts')).map(item=>item.key));const retryable=(await ZX.Database.all('outbox')).some(item=>(item.attempts||0)<MAX_ATTEMPTS&&!conflictKeys.has(item.key));if(retryable){clearTimeout(schedule.timer);schedule.timer=setTimeout(sync,1200);}const complete=stats.pending===0&&stats.cleanup===0&&stats.conflicts===0;onStatus(complete?'online':'pending');return complete; }
     catch (error) { onStatus('error', error); return false; }
   }
   async function migrateLegacy() {

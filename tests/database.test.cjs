@@ -59,3 +59,15 @@ test('failed attachment uploads can be retried or discarded in bulk without dele
   assert.equal((await ZX.Database.state()).students[0].preparations[0].title, '备课');
   assert.equal((await ZX.Database.state()).students[0].preparations[0].files.length, 0);
 });
+
+test('failed data records can be returned to the synchronization queue', async () => {
+  await ZX.Database.wipe();
+  const id = '66666666-6666-4666-8666-666666666666';
+  const key = `students:${id}`;
+  await ZX.Database.put('outbox', { key, entity: 'students', id, data: { name: '待重试学生' }, operation: 'upsert', baseVersion: 0, attempts: 6, lastError: 'RPC rejected' });
+
+  assert.equal(await ZX.Database.retryFailedItems(), 1);
+  const retried = await ZX.Database.get('outbox', key);
+  assert.equal(retried.attempts, 0);
+  assert.equal(retried.lastError, '');
+});

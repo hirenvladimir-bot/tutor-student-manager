@@ -91,6 +91,11 @@
     for (const item of failed) await put('outbox', { ...item, attempts: 0, lastError: '', queuedAt: new Date().toISOString() });
     return failed.length;
   }
+  async function retryFailedItems() {
+    const failed = (await all('outbox')).filter(item => (item.attempts || 0) >= MAX_ATTEMPTS);
+    for (const item of failed) await put('outbox', { ...item, attempts: 0, lastError: '', queuedAt: new Date().toISOString() });
+    return failed.length;
+  }
   async function discardFailedUploads() {
     const failed = (await all('outbox')).filter(item => item.entity === 'attachments' && item.data?.localBlobKey && (item.attempts || 0) >= MAX_ATTEMPTS);
     for (const item of failed) await discardLocalRecord(item.key);
@@ -98,5 +103,5 @@
   }
   async function wipe() { for (const store of STORES) await clear(store); baseline = new Map(); }
 
-  ZX.Database = { DB_NAME, MAX_ATTEMPTS, start, persist, all, get, put, remove, clear, state, stats, queueNewRecords, discardLocalRecord, retryFailedUploads, discardFailedUploads, applyServerRecord, markApplied, saveConflict, resolveConflict, wipe };
+  ZX.Database = { DB_NAME, MAX_ATTEMPTS, start, persist, all, get, put, remove, clear, state, stats, queueNewRecords, discardLocalRecord, retryFailedUploads, retryFailedItems, discardFailedUploads, applyServerRecord, markApplied, saveConflict, resolveConflict, wipe };
 })(window);

@@ -186,6 +186,17 @@ test('legacy compatibility snapshot failures make the sync visibly fail', async 
   assert.equal(await ZX.Sync.sync(), false);
 });
 
+test('sync stays incomplete while an exhausted failed record is retained', async () => {
+  const ZX = loadDevice();
+  const cloud = mockCloud('ffffffff-ffff-4fff-8fff-ffffffffffff');
+  await startDevice(ZX, cloud.client, { students: [], activeId: null });
+  const id = '99999999-9999-4999-8999-999999999999';
+  await ZX.Database.put('outbox', { key: `students:${id}`, entity: 'students', id, data: { name: '同步失败记录' }, operation: 'upsert', baseVersion: 0, attempts: 6, lastError: 'RPC rejected' });
+
+  assert.equal(await ZX.Sync.sync(), false);
+  assert.equal((await ZX.Database.stats()).failed, 1);
+});
+
 test('production TUS endpoint uses the direct Supabase Storage hostname', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   assert.match(source, /nnnxsjqbklnykshqgntt\.storage\.supabase\.co\/storage\/v1\/upload\/resumable/);
