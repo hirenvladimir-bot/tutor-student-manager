@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>知行 · 家教学生管理</title>
   <link rel="stylesheet" href="style.css" />
-  <link rel="stylesheet" href="ui-overrides.css?v=16" />
+  <link rel="stylesheet" href="ui-overrides.css?v=17" />
 </head>
 <body>
   <main class="app-shell">
@@ -40,10 +40,10 @@
         <div class="content-grid">
           <div class="main-column">
             <section class="overview-card card">
-              <div class="score-ring" id="scoreRing"><span id="currentScore">—</span><small>目前分数</small></div>
+              <button class="score-ring quick-score-field" id="scoreRing" type="button" data-quick-field="currentScore" aria-label="快速修改目前分数" title="点击快速修改目前分数"><span id="currentScore">—</span><small>目前分数</small><i aria-hidden="true">✎</i></button>
               <div class="overview-detail">
-                <div class="school-row"><div><span class="field-label">就读学校</span><strong id="schoolText">—</strong></div><div><span class="field-label">目标学校</span><strong id="targetSchoolText">—</strong></div></div>
-                <p class="overview-hint">用清晰记录陪伴每一步进步</p>
+                <div class="school-row"><button type="button" class="quick-profile-field" data-quick-field="school" aria-label="快速修改就读学校"><span class="field-label">就读学校</span><strong id="schoolText">—</strong><small>点击修改</small></button><button type="button" class="quick-profile-field" data-quick-field="targetSchool" aria-label="快速修改目标学校"><span class="field-label">目标学校</span><strong id="targetSchoolText">—</strong><small>点击修改</small></button></div>
+                <p class="overview-hint">点击上方信息即可快速修改</p>
               </div>
             </section>
 
@@ -77,7 +77,7 @@
           </div>
 
           <aside class="right-column">
-            <section class="card goal-card"><span class="section-kicker">分数目标</span><div class="goal-number"><span id="targetScore">—</span><small>分</small></div><p id="goalHint">设定目标，稳步前进</p></section>
+            <section class="card goal-card"><span class="section-kicker">分数目标</span><button type="button" class="goal-quick-field" data-quick-field="targetScore" aria-label="快速修改目标分数"><span class="goal-number"><span id="targetScore">—</span><small id="targetScoreUnit">分</small></span><span class="goal-edit-hint">✎ 点击修改</span></button><p id="goalHint">设定目标，稳步前进</p></section>
             <section class="card custom-card"><div class="section-head"><div><span class="section-kicker">自定义档案</span><h2>其他信息</h2></div><button class="text-btn" id="addCustomBtn">＋ 添加</button></div><div id="customFields" class="custom-fields"></div></section>
           </aside>
         </div>
@@ -86,6 +86,8 @@
   </main>
 
   <dialog id="studentDialog" class="modal"><form method="dialog" id="studentForm"><div class="modal-head"><div><span class="section-kicker">学生资料</span><h2 id="studentDialogTitle">添加学生</h2></div><button type="button" class="close" id="closeStudentDialog">×</button></div><div class="form-grid"><label>姓名<input name="name" required placeholder="例如：林小雨" /></label><label>就读学校<input name="school" placeholder="例如：育才中学" /></label><label>目标学校<input name="targetSchool" placeholder="例如：市实验中学" /></label><label>目前分数<input name="currentScore" type="text" placeholder="例如：82/100、待测" /></label><label>目标分数<input name="targetScore" type="text" placeholder="例如：90 分、120/150" /></label></div><div class="modal-actions"><button type="button" id="cancelStudentDialog" class="outline-btn">取消</button><button class="primary-btn" value="default">保存档案</button></div></form></dialog>
+
+  <dialog id="quickEditDialog" class="modal compact quick-edit-dialog"><form method="dialog" id="quickEditForm"><div class="modal-head"><div><span class="section-kicker">快捷修改</span><h2 id="quickEditTitle">修改信息</h2></div><button type="button" class="close" id="closeQuickEditDialog">×</button></div><div class="form-grid one-col"><label><span id="quickEditLabel">内容</span><input name="value" type="text" autocomplete="off" /></label></div><p class="helper">可自由输入文字或数字；留空可清除此项。</p><div class="modal-actions"><button type="button" id="cancelQuickEditDialog" class="outline-btn">取消</button><button class="primary-btn" value="default">保存修改</button></div></form></dialog>
 
   <dialog id="scoreDialog" class="modal compact"><form method="dialog" id="scoreForm"><div class="modal-head"><div><span class="section-kicker">考试记录</span><h2>添加成绩</h2></div><button type="button" class="close" id="closeScoreDialog">×</button></div><div class="form-grid one-col"><label>考试名称<input name="label" required placeholder="例如：九月月考" /></label><label>考试日期<input name="date" type="date" required /></label><label>分数<input name="score" required type="text" inputmode="decimal" placeholder="例如：86 或 86.5" /></label></div><p class="form-message" id="scoreMessage" aria-live="polite"></p><div class="modal-actions"><button type="button" id="cancelScoreDialog" class="outline-btn">取消</button><button class="primary-btn" value="default">记录成绩</button></div></form></dialog>
 
@@ -107,6 +109,6 @@
   <script src="src/files.js?v=9"></script>
 <script src="src/sync.js?v=10"></script>
   <script src="src/portable.js?v=1"></script>
-  <script src="app.js?v=47"></script>
+  <script src="app.js?v=48"></script>
 </body>
 </html>

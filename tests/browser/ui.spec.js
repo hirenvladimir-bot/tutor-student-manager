@@ -113,7 +113,7 @@ test('an expired cached account is not presented as signed in', async ({ page })
 test('local interface becomes ready without waiting for cloud restoration', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true');
   const source = await page.locator('script[src*="app.js"]').getAttribute('src');
-  expect(source).toContain('v=47');
+  expect(source).toContain('v=48');
   const bootstrapSource = await page.evaluate(() => bootstrap.toString());
   expect(bootstrapSource).not.toContain('await restoreSession');
   expect(bootstrapSource).toContain('restoreSession().then');
@@ -151,6 +151,30 @@ test('free-form scores save and progress records can be edited', async ({ page }
   await page.getByRole('button', { name: '保存进度' }).click();
   await page.locator('.edit-course').click();
   await expect(page.locator('#courseDialog h2')).toHaveText('编辑进度');
+});
+
+test('overview profile fields support quick editing and local persistence', async ({ page }) => {
+  await page.getByRole('button', { name: '添加第一位学生' }).click();
+  await page.locator('[name=name]').fill('快捷修改测试');
+  await page.getByRole('button', { name: '保存档案' }).click();
+
+  const changes = [
+    ['快速修改目前分数', '阶段待测', '#currentScore'],
+    ['快速修改就读学校', '青冈八中', '#schoolText'],
+    ['快速修改目标学校', '东北农业大学', '#targetSchoolText'],
+    ['快速修改目标分数', 'A 档', '#targetScore']
+  ];
+  for (const [buttonName, value, target] of changes) {
+    await page.getByRole('button', { name: buttonName }).click();
+    await expect(page.locator('#quickEditDialog')).toHaveAttribute('open', '');
+    await page.locator('#quickEditForm [name=value]').fill(value);
+    await page.getByRole('button', { name: '保存修改' }).click();
+    await expect(page.locator(target)).toHaveText(value);
+  }
+  const stored = await page.evaluate(async () => { await persistQueue; return (await Zhixing.Database.state()).students[0]; });
+  expect(stored).toMatchObject({ currentScore: '阶段待测', school: '青冈八中', targetSchool: '东北农业大学', targetScore: 'A 档' });
+  await expect(page.locator('#targetScoreUnit')).toBeHidden();
+  expect(await page.evaluate(() => Zhixing.Database.stats().then(stats => stats.pending))).toBeGreaterThan(0);
 });
 
 test('invalid exam scores and download errors use in-app messages instead of native alerts', async ({ page }) => {
