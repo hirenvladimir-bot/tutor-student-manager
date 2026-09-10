@@ -113,7 +113,7 @@ test('an expired cached account is not presented as signed in', async ({ page })
 test('local interface becomes ready without waiting for cloud restoration', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true');
   const source = await page.locator('script[src*="app.js"]').getAttribute('src');
-  expect(source).toContain('v=45');
+  expect(source).toContain('v=46');
   const bootstrapSource = await page.evaluate(() => bootstrap.toString());
   expect(bootstrapSource).not.toContain('await restoreSession');
   expect(bootstrapSource).toContain('restoreSession().then');
