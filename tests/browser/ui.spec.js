@@ -115,7 +115,7 @@ test('an expired cached account is not presented as signed in', async ({ page })
 test('local interface becomes ready without waiting for cloud restoration', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true');
   const source = await page.locator('script[src*="app.js"]').getAttribute('src');
-  expect(source).toContain('v=53');
+  expect(source).toContain('v=54');
   const bootstrapSource = await page.evaluate(() => bootstrap.toString());
   expect(bootstrapSource).not.toContain('await restoreSession');
   expect(bootstrapSource).toContain('restoreSession().then');
@@ -548,6 +548,28 @@ test('responsive layout avoids body zoom and horizontal overflow at a 200% equiv
   expect(layout.overflow).toBeFalsy();
   await page.locator('#sidebarAuthButton').click();
   await expect(page.locator('#dataDialog')).toHaveAttribute('open', '');
+});
+
+test('calendar adds synced student lessons and blocks overlapping times', async ({ page }) => {
+  await page.locator('#emptyAddButton').click();
+  await page.locator('#studentForm [name=name]').fill('排课学生');
+  await page.getByRole('button', { name: '保存档案' }).click();
+  await page.locator('#calendarButton').click();
+  await page.locator('#addScheduleBtn').click();
+  await page.locator('#scheduleForm [name=title]').fill('数学辅导');
+  await page.locator('#scheduleForm [name=date]').fill('2026-09-15');
+  await page.locator('#scheduleForm [name=startTime]').fill('10:00');
+  await page.locator('#scheduleForm [name=endTime]').fill('11:00');
+  await page.getByRole('button', { name: '保存课程' }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('zhixing-tutor-students-v1')).students[0].scheduleEntries.length)).toBe(1);
+  await page.locator('#addScheduleBtn').click();
+  await page.locator('#scheduleForm [name=title]').fill('冲突课程');
+  await page.locator('#scheduleForm [name=date]').fill('2026-09-15');
+  await page.locator('#scheduleForm [name=startTime]').fill('10:30');
+  await page.locator('#scheduleForm [name=endTime]').fill('11:30');
+  await page.getByRole('button', { name: '保存课程' }).click();
+  await expect(page.locator('#scheduleMessage')).toContainText('时间冲突');
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('zhixing-tutor-students-v1')).students[0].scheduleEntries.length)).toBe(1);
 });
 
 test('Escape and backdrop follow the same safe dialog close rules', async ({ page }) => {

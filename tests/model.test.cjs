@@ -45,6 +45,17 @@ test('timestamped teaching notes are encoded into compatible text columns', () =
   assert.equal(restored.students[0].nextLessonEntries[0].createdAt, '2026-09-10T08:30:00.000Z');
 });
 
+test('calendar entries round-trip through the existing student record without touching attachments', () => {
+  const original = fixture();
+  original.students[0].scheduleEntries = [{ id: 'lesson-a', title: '数学辅导', startAt: '2026-09-14T08:00:00.000Z', endAt: '2026-09-14T09:30:00.000Z', note: '带试卷', createdAt: '2026-09-13T08:00:00.000Z' }];
+  const before = Model.flatten(original);
+  const restored = Model.hydrate(before, original.activeId);
+  assert.equal(restored.students[0].scheduleEntries[0].title, '数学辅导');
+  restored.students[0].scheduleEntries[0].note = '改带作业';
+  const changes = Model.diff(before, Model.flatten(restored));
+  assert.deepEqual(Array.from(changes, item => item.entity), ['students']);
+});
+
 test('legacy data-url attachments survive v2 normalization', () => {
   const original = fixture();
   original.students[0].preparations[0].files[0] = { id: '55555555-5555-4555-8555-555555555555', name: '旧讲义.txt', type: 'text/plain', data: 'data:text/plain;base64,5YaF5a65' };

@@ -3,6 +3,7 @@
   const ZX = root.Zhixing = root.Zhixing || {};
   let client, bucket, endpoint, onStatus = () => {};
   const activeUploads = new Map();
+  const uploadedThisRun = new Set();
   const uuid = () => crypto.randomUUID();
   const safeName = name => `file.${(name.match(/\.([a-z0-9]{1,12})$/i)?.[1] || 'bin').toLowerCase()}`;
   const report = (message, detail) => onStatus(message, detail);
@@ -103,6 +104,14 @@
       if (mutation.data.localBlobKey) await ZX.Database.remove('blobs', mutation.data.localBlobKey);
       return mutation;
     }
+    if (mutation.data.path) {
+      if (mutation.data.localBlobKey) await ZX.Database.remove('blobs', mutation.data.localBlobKey).catch(() => {});
+      const data = { ...mutation.data };
+      delete data.localBlobKey;
+      delete data.uploadPath;
+      data.pending = false;
+      return { ...mutation, data };
+    }
     if (!mutation.data.path && mutation.data.localBlobKey) {
       const detail = { key: mutation.key, id: mutation.id, name: mutation.data.name, state: 'queued', percent: 0 };
       try {
@@ -131,6 +140,7 @@
         await ZX.Database.remove('blobs', cached.key);
         await ZX.Database.applyServerRecord({ ...mutation, version: mutation.baseVersion, deletedAt: null });
         await ZX.Database.put('outbox', mutation);
+        uploadedThisRun.add(mutation.key);
         report(`${mutation.data.name} 已上传，正在同步附件记录`, { ...detail, state: 'syncing', percent: 100 });
       } catch (error) {
         const state = error.code === 'AUTH_REQUIRED' ? 'waiting-auth' : error.code === 'UPLOAD_CANCELLED' ? 'cancelled' : 'failed';
@@ -143,7 +153,10 @@
   async function afterApplied(applied, queued) {
     const keys = new Set((applied || []).map(item => item.key));
     for (const mutation of queued || []) {
-      if (keys.has(mutation.key) && mutation.entity === 'attachments' && mutation.operation !== 'delete') report(`${mutation.data.name} 已完成云端同步`, { key: mutation.key, id: mutation.id, name: mutation.data.name, state: 'complete', percent: 100 });
+      if (keys.has(mutation.key) && mutation.entity === 'attachments' && mutation.operation !== 'delete' && uploadedThisRun.has(mutation.key)) {
+        uploadedThisRun.delete(mutation.key);
+        report(`${mutation.data.name} 已完成云端同步`, { key: mutation.key, id: mutation.id, name: mutation.data.name, state: 'complete', percent: 100 });
+      }
       if (keys.has(mutation.key) && mutation.entity === 'attachments' && mutation.operation === 'delete') await queueCleanup(mutation.data.path);
     }
     await processCleanup();

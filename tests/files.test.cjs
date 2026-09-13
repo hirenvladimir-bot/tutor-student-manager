@@ -95,6 +95,19 @@ test('TUS upload resumes a previous fingerprint and preserves a folder path', as
   assert.ok(events.some(event => event.key === mutation.key && event.state === 'syncing' && event.percent === 100));
 });
 
+test('an already uploaded attachment is never uploaded or reported complete again', async () => {
+  let uploadConstructed = 0;
+  class Upload { constructor() { uploadConstructed++; } }
+  const ZX = load({ Upload }), events = [];
+  ZX.Files.configure({ client: uploadClient(), bucket: 'tutor-files', endpoint: 'https://storage.test/upload/resumable', onStatus: (_message, detail) => detail && events.push(detail) });
+  const mutation = { key: 'attachments:done', entity: 'attachments', id: 'done', studentId: 'student-a', baseVersion: 2, operation: 'upsert', data: { name: '已完成.pdf', path: 'user/student/preparations/item/file.pdf', pending: false, localBlobKey: 'blob:stale', ownerType: 'preparations', ownerId: 'item' } };
+  const ready = await ZX.Files.beforeSync(mutation);
+  await ZX.Files.afterApplied([{ key: mutation.key }], [ready]);
+  assert.equal(uploadConstructed, 0);
+  assert.equal(ready.data.localBlobKey, undefined);
+  assert.equal(events.length, 0);
+});
+
 test('attachment upload reports a distinct live failure state', async () => {
   class Upload {
     constructor(file, options) { this.options = options; }

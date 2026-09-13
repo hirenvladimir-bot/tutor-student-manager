@@ -5,15 +5,27 @@
   const clone = value => JSON.parse(JSON.stringify(value));
   const uuid = () => root.crypto?.randomUUID?.() || `zx-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const notePrefix = '[[ZHIXING_NOTES_V1]]';
+  const bundlePrefix = '[[ZHIXING_NOTES_V2]]';
   const own = (obj, keys) => Object.fromEntries(keys.map(k => [k, obj?.[k] ?? (k.endsWith('Score') ? null : '')]));
   const attachmentData = (file, ownerType, ownerId) => ({ ownerType, ownerId, name: file.name || '未命名文件', relativePath: file.relativePath || '', type: file.type || 'application/octet-stream', size: Number(file.size || 0), path: file.path || '', uploadPath: file.uploadPath || '', data: file.data || '', pending: Boolean(file.pending), localBlobKey: file.localBlobKey || '' });
   function decodeNoteEntries(value) {
-    if (typeof value !== 'string' || !value.startsWith(notePrefix)) return null;
-    try { const parsed = JSON.parse(value.slice(notePrefix.length)); return Array.isArray(parsed) ? parsed : []; }
+    if (typeof value !== 'string' || (!value.startsWith(notePrefix) && !value.startsWith(bundlePrefix))) return null;
+    try { const parsed = JSON.parse(value.slice(value.startsWith(bundlePrefix) ? bundlePrefix.length : notePrefix.length)); return Array.isArray(parsed) ? parsed : (Array.isArray(parsed.notes) ? parsed.notes : []); }
+    catch { return []; }
+  }
+  function decodeScheduleEntries(value) {
+    if (typeof value !== 'string' || !value.startsWith(bundlePrefix)) return null;
+    try { const parsed = JSON.parse(value.slice(bundlePrefix.length)); return normalizeScheduleEntries(parsed.schedules); }
     catch { return []; }
   }
   function encodeNoteEntries(entries, legacy = '') { return Array.isArray(entries) ? `${notePrefix}${JSON.stringify(entries)}` : (legacy || ''); }
+  function encodeStudentBundle(notes, schedules, legacy = '') {
+    if (!Array.isArray(notes) && !Array.isArray(schedules)) return legacy || '';
+    const fallbackNotes = Array.isArray(notes) ? notes : (decodeNoteEntries(legacy) || (legacy ? [{ id: 'legacy-note', text: legacy, createdAt: '1970-01-01T00:00:00.000Z' }] : []));
+    return `${bundlePrefix}${JSON.stringify({ notes: normalizeNoteEntries(fallbackNotes), schedules: normalizeScheduleEntries(schedules) })}`;
+  }
   function normalizeNoteEntries(entries) { return (Array.isArray(entries) ? entries : []).map(item => ({ id: item.id || uuid(), text: String(item.text || '').trim(), createdAt: item.createdAt || new Date().toISOString() })).filter(item => item.text); }
+  function normalizeScheduleEntries(entries) { return (Array.isArray(entries) ? entries : []).map(item => ({ id: item.id || uuid(), title: String(item.title || '课程').trim() || '课程', startAt: item.startAt || '', endAt: item.endAt || '', note: String(item.note || '').trim(), createdAt: item.createdAt || new Date().toISOString() })).filter(item => item.startAt && item.endAt); }
 
   function ensureIds(state) {
     const next = clone(state || { students: [], activeId: null });
@@ -26,6 +38,8 @@
       student.custom = Array.isArray(student.custom) ? student.custom : [];
       if (Array.isArray(student.nextLessonEntries)) student.nextLessonEntries = normalizeNoteEntries(student.nextLessonEntries);
       if (Array.isArray(student.focusContentEntries)) student.focusContentEntries = normalizeNoteEntries(student.focusContentEntries);
+      if (Array.isArray(student.scheduleEntries)) student.scheduleEntries = normalizeScheduleEntries(student.scheduleEntries);
+      else if (decodeScheduleEntries(student.nextLesson)) student.scheduleEntries = decodeScheduleEntries(student.nextLesson);
       student.scores.forEach(item => item.id ||= uuid());
       student.preparations.forEach(item => item.id ||= uuid());
       student.courseProgress.forEach(item => item.id ||= uuid());
@@ -47,7 +61,7 @@
     });
     ensureIds(state).students.forEach(student => {
       const profile = own(student, ['name', 'school', 'targetSchool', 'currentScore', 'targetScore']);
-      profile.nextLesson = encodeNoteEntries(student.nextLessonEntries, student.nextLesson);
+      profile.nextLesson = student.scheduleEntries?.length ? encodeStudentBundle(student.nextLessonEntries, student.scheduleEntries, student.nextLesson) : encodeNoteEntries(student.nextLessonEntries, student.nextLesson);
       profile.focusContent = encodeNoteEntries(student.focusContentEntries, student.focusContent);
       put('students', student.id, null, profile, student._version);
       student.scores.forEach(item => put('scores', item.id, student.id, own(item, ['label', 'date', 'score']), item._version));
@@ -67,8 +81,9 @@
   function hydrate(records, activeId = null) {
     const live = [...records.values()].filter(r => !r.deletedAt);
     const students = live.filter(r => r.entity === 'students').map(r => {
-      const data = clone(r.data), nextLessonEntries = decodeNoteEntries(data.nextLesson), focusContentEntries = decodeNoteEntries(data.focusContent);
+      const data = clone(r.data), nextLessonEntries = decodeNoteEntries(data.nextLesson), scheduleEntries = decodeScheduleEntries(data.nextLesson), focusContentEntries = decodeNoteEntries(data.focusContent);
       if (nextLessonEntries) { data.nextLessonEntries = normalizeNoteEntries(nextLessonEntries); data.nextLesson = ''; }
+      data.scheduleEntries = normalizeScheduleEntries(scheduleEntries);
       if (focusContentEntries) { data.focusContentEntries = normalizeNoteEntries(focusContentEntries); data.focusContent = ''; }
       return { id: r.id, ...data, _version: r.version, scores: [], preparations: [], courseProgress: [], custom: [] };
     });
@@ -113,5 +128,5 @@
     return changes;
   }
 
-  ZX.Model = { entityOrder, clone, ensureIds, flatten, hydrate, diff, decodeNoteEntries, encodeNoteEntries, normalizeNoteEntries };
+  ZX.Model = { entityOrder, clone, ensureIds, flatten, hydrate, diff, decodeNoteEntries, decodeScheduleEntries, encodeNoteEntries, encodeStudentBundle, normalizeNoteEntries, normalizeScheduleEntries };
 })(window);

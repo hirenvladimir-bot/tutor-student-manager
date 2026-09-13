@@ -39,3 +39,13 @@ test('timestamped teaching notes survive readable Markdown export and import', (
   assert.equal(restored.nextLessonEntries[0].createdAt, '2026-09-10T08:30:00.000Z');
   assert.equal(restored.focusContentEntries[0].text, '先圈关键词');
 });
+
+test('calendar entries survive readable Markdown export and import', () => {
+  const scheduled = structuredClone(fixture);
+  scheduled.students[0].scheduleEntries = [{ id: 'lesson-a', title: '数学辅导', startAt: '2026-09-14T08:00:00.000Z', endAt: '2026-09-14T09:30:00.000Z', note: '带试卷', createdAt: '2026-09-13T08:00:00.000Z' }];
+  const readable = Portable.markdown(scheduled, true).replace(/\n\n\[\[ZHIXING_V2:[A-Za-z0-9+/=]+\]\]\s*$/, '');
+  const restored = Portable.parse(readable).students[0].scheduleEntries[0];
+  assert.equal(restored.title, '数学辅导');
+  assert.equal(restored.note, '带试卷');
+  assert.equal(restored.startAt, '2026-09-14T08:00:00.000Z');
+});
