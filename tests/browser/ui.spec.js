@@ -115,7 +115,7 @@ test('an expired cached account is not presented as signed in', async ({ page })
 test('local interface becomes ready without waiting for cloud restoration', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true');
   const source = await page.locator('script[src*="app.js"]').getAttribute('src');
-  expect(source).toContain('v=54');
+  expect(source).toContain('v=55');
   const bootstrapSource = await page.evaluate(() => bootstrap.toString());
   expect(bootstrapSource).not.toContain('await restoreSession');
   expect(bootstrapSource).toContain('restoreSession().then');
@@ -139,6 +139,21 @@ test('cloud diagnostic button is wired and remains inside the data center', asyn
   await expect(page.locator('#syncDetail')).toContainText('云端自检');
   const overflow = await page.locator('#dataDialog form').evaluate(element => element.scrollWidth > element.clientWidth);
   expect(overflow).toBeFalsy();
+});
+
+test('data center identifies every queued record instead of showing only a count', async ({ page }) => {
+  await page.evaluate(async () => {
+    cloud.userEmail = 'queue@example.com';
+    await Zhixing.Database.put('outbox', { key: 'students:queued-a', entity: 'students', id: 'queued-a', data: { name: '待同步学生' }, baseVersion: 1, operation: 'upsert', attempts: 0 });
+    await Zhixing.Database.put('outbox', { key: 'custom_fields:queued-b', entity: 'custom_fields', id: 'queued-b', data: { key: '待同步信息', value: '内容' }, baseVersion: 1, operation: 'upsert', attempts: 1 });
+    openDataCenter();
+    await renderSyncStatus();
+    await renderUploadQueue();
+  });
+  await expect(page.locator('#uploadQueue')).toContainText('2 条记录等待确认');
+  await expect(page.locator('#uploadQueue')).toContainText('待同步学生');
+  await expect(page.locator('#uploadQueue')).toContainText('待同步信息');
+  await expect(page.locator('#uploadQueue .cancel-upload')).toHaveCount(0);
 });
 
 test('free-form scores save and progress records can be edited', async ({ page }) => {

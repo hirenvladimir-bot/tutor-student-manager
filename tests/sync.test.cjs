@@ -94,6 +94,33 @@ test('two devices merge different records and preserve both versions of a same-r
   assert.equal((await B.Database.state()).students.find(item => item.id === firstId).name, '设备 B 版本');
 });
 
+test('startup waits for asynchronous state normalization and drains the records it queues', async () => {
+  const ZX = loadDevice(), userId = 'dededede-dede-4ede-8ede-dededededede', cloud = mockCloud(userId);
+  await ZX.Database.start({ students: [], activeId: null });
+  ZX.Files.configure({ client: cloud.client, bucket: 'tutor-files', endpoint: 'unused' });
+  for (let index = 0; index < 4; index++) {
+    const id = `${index + 1}1111111-1111-4111-8111-111111111111`;
+    cloud.rows.set(`students:${id}`, { id, user_id: userId, name: `待迁移学生${index + 1}`, school: '', target_school: '', current_score: null, target_score: null, next_lesson: '', focus_content: '', version: 1, deleted_at: null, updated_at: new Date().toISOString() });
+  }
+
+  await ZX.Sync.start({
+    client: cloud.client,
+    onState: async () => {
+      await new Promise(resolve => setTimeout(resolve, 5));
+      const state = await ZX.Database.state();
+      let changed = false;
+      for (const student of state.students) {
+        if (!Array.isArray(student.nextLessonEntries)) { student.nextLessonEntries = []; changed = true; }
+        if (!Array.isArray(student.focusContentEntries)) { student.focusContentEntries = []; changed = true; }
+      }
+      if (changed) await ZX.Database.persist(state, true);
+    }
+  });
+
+  assert.equal((await ZX.Database.all('outbox')).length, 0, 'normalization records must be flushed before startup reports ready');
+  assert.equal([...cloud.rows.values()].filter(row => row.name?.startsWith('待迁移学生')).every(row => row.version === 2), true);
+});
+
 test('conflicted records pause in the outbox until the user resolves them', async () => {
   const scheduled = [];
   const ZX = loadDevice({ setTimeout: (callback, delay) => { scheduled.push({ callback, delay }); return scheduled.length; }, clearTimeout() {} });

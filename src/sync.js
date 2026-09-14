@@ -93,7 +93,7 @@
         }
       }
     }
-    onState(await ZX.Database.state());
+    await onState(await ZX.Database.state());
   }
   function pull() {
     if (pullPromise) return pullPromise;
@@ -123,7 +123,7 @@
           }
         }
       }
-      if (ready.length) onState(await ZX.Database.state());
+      if (ready.length) await onState(await ZX.Database.state());
       if (ready.length) {
         const payload = ready.map(item => ({ entity: item.entity, id: item.id, student_id: item.studentId, base_version: item.baseVersion, operation: item.operation, data: item.data, deleted_at: item.deletedAt }));
         const { data, error } = await client.rpc('apply_tutor_mutations', { p_mutations: payload });
@@ -143,7 +143,8 @@
         if (equivalent.length) await ZX.Files.afterApplied(equivalent.map(item => ({ key: item.key })), equivalent);
       }
       retryCount = 0; clearTimeout(sync.retryTimer);
-      if (uploadErrors.length) onStatus('error', uploadErrors[0]); else onStatus('online');
+      const remaining = await ZX.Database.all('outbox');
+      if (uploadErrors.length) onStatus('error', uploadErrors[0]); else onStatus(remaining.length ? 'pending' : 'online');
     } catch (error) {
       onStatus('error', error);
       if (online()) { clearTimeout(sync.retryTimer); const delay = Math.min(60000, 5000 * (2 ** Math.min(retryCount++, 3))); sync.retryTimer = setTimeout(sync, delay); }
