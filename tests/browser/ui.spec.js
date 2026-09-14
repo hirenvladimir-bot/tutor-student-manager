@@ -129,7 +129,7 @@ test('a signed-in account must be logged out before another account can be enter
 test('local interface becomes ready without waiting for cloud restoration', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true');
   const source = await page.locator('script[src*="app.js"]').getAttribute('src');
-  expect(source).toContain('v=57');
+  expect(source).toContain('v=58');
   const bootstrapSource = await page.evaluate(() => bootstrap.toString());
   expect(bootstrapSource).not.toContain('await restoreSession');
   expect(bootstrapSource).toContain('restoreSession().then');
@@ -636,26 +636,131 @@ test('responsive layout avoids body zoom and horizontal overflow at a 200% equiv
   await expect(page.locator('#dataDialog')).toHaveAttribute('open', '');
 });
 
-test('calendar adds synced student lessons and blocks overlapping times', async ({ page }) => {
+test('calendar date cells prefill the exact date and saved lessons appear on both entry points', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name.startsWith('mobile-'), 'the compact agenda intentionally replaces date cells on phones');
   await page.locator('#emptyAddButton').click();
-  await page.locator('#studentForm [name=name]').fill('排课学生');
+  await page.locator('#studentForm [name=name]').fill('日期格排课学生');
   await page.getByRole('button', { name: '保存档案' }).click();
+  await page.evaluate(() => { calendarCursor = new Date(2026, 8, 1); });
   await page.locator('#calendarButton').click();
-  await page.locator('#addScheduleBtn').click();
+
+  const day = page.locator('.calendar-day[data-date="2026-09-17"]');
+  await expect(day).toBeVisible();
+  await day.click();
+  await expect(page.locator('#scheduleDialogTitle')).toHaveText('添加课程');
+  await expect(page.locator('#scheduleForm [name=date]')).toHaveValue('2026-09-17');
+  await page.locator('#scheduleForm [name=title]').fill('日期格数学课');
+  await page.locator('#scheduleForm [name=startTime]').fill('10:00');
+  await page.locator('#scheduleForm [name=endTime]').fill('11:00');
+  await page.getByRole('button', { name: '保存课程' }).click();
+
+  const calendarEvent = page.locator('.calendar-day[data-date="2026-09-17"] .calendar-event');
+  await expect(calendarEvent).toContainText('日期格排课学生 · 日期格数学课');
+  await calendarEvent.click();
+  await expect(page.locator('#scheduleDialogTitle')).toHaveText('编辑课程');
+  await expect(page.locator('#scheduleForm [name=title]')).toHaveValue('日期格数学课');
+  await page.locator('#cancelScheduleDialog').click();
+  await page.locator('#closeCalendarDialog').click();
+  await expect(page.locator('#studentScheduleList .student-schedule-item')).toContainText('日期格数学课');
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('zhixing-tutor-students-v1')).students[0].scheduleEntries.length)).toBe(1);
+});
+
+test('student-page lessons appear in the calendar and edits and deletion update both views', async ({ page }, testInfo) => {
+  await page.locator('#emptyAddButton').click();
+  await page.locator('#studentForm [name=name]').fill('双入口排课学生');
+  await page.getByRole('button', { name: '保存档案' }).click();
+  await page.locator('#addStudentScheduleButton').click();
+  await expect(page.locator('#scheduleForm [name=studentId]')).toHaveValue(await page.evaluate(() => active().id));
+  await page.locator('#scheduleForm [name=title]').fill('学生页新增课程');
+  await page.locator('#scheduleForm [name=date]').fill('2026-09-18');
+  await page.locator('#scheduleForm [name=startTime]').fill('14:00');
+  await page.locator('#scheduleForm [name=endTime]').fill('15:00');
+  await page.getByRole('button', { name: '保存课程' }).click();
+  await expect(page.locator('#studentScheduleList .student-schedule-item')).toContainText('学生页新增课程');
+
+  await page.locator('#studentScheduleList .student-schedule-item').click();
+  await page.locator('#scheduleForm [name=title]').fill('两处同步后的课程');
+  await page.getByRole('button', { name: '保存课程' }).click();
+  await expect(page.locator('#studentScheduleList')).toContainText('两处同步后的课程');
+  await page.evaluate(() => { calendarCursor = new Date(2026, 8, 1); });
+  await page.locator('#openStudentCalendarButton').click();
+  const mobile = testInfo.project.name.startsWith('mobile-');
+  const calendarEntry = mobile ? page.locator('#calendarAgenda .upcoming-item').filter({ hasText: '两处同步后的课程' }) : page.locator('.calendar-day[data-date="2026-09-18"] .calendar-event');
+  const calendarEvent = mobile ? calendarEntry.locator('button[data-id]') : calendarEntry;
+  await expect(calendarEntry).toContainText('两处同步后的课程');
+
+  await calendarEvent.click();
+  await expect(page.locator('#scheduleDialogTitle')).toHaveText('编辑课程');
+  await page.locator('#deleteScheduleBtn').click();
+  await expect(page.locator('#confirmDialog')).toHaveAttribute('open', '');
+  await page.locator('#confirmAccept').click();
+  await expect(calendarEntry).toHaveCount(0);
+  await page.locator('#closeCalendarDialog').click();
+  await expect(page.locator('#studentScheduleList .student-schedule-item')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('zhixing-tutor-students-v1')).students[0].scheduleEntries.length)).toBe(0);
+});
+
+test('calendar cells support Enter and Space without event clicks opening a duplicate lesson', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name.startsWith('mobile-'), 'the compact agenda intentionally replaces date cells on phones');
+  await page.locator('#emptyAddButton').click();
+  await page.locator('#studentForm [name=name]').fill('键盘排课学生');
+  await page.getByRole('button', { name: '保存档案' }).click();
+  await page.evaluate(() => { calendarCursor = new Date(2026, 8, 1); });
+  await page.locator('#calendarButton').click();
+
+  const enterDay = page.locator('.calendar-day[data-date="2026-09-19"]');
+  await enterDay.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#scheduleForm [name=date]')).toHaveValue('2026-09-19');
+  await page.locator('#scheduleForm [name=title]').fill('键盘课程');
+  await page.locator('#scheduleForm [name=startTime]').fill('09:00');
+  await page.locator('#scheduleForm [name=endTime]').fill('10:00');
+  await page.getByRole('button', { name: '保存课程' }).click();
+  const event = page.locator('.calendar-day[data-date="2026-09-19"] .calendar-event');
+  await event.click();
+  await expect(page.locator('#scheduleDialogTitle')).toHaveText('编辑课程');
+  await page.locator('#cancelScheduleDialog').click();
+  await expect.poll(() => page.evaluate(() => active().scheduleEntries.length)).toBe(1);
+
+  const spaceDay = page.locator('.calendar-day[data-date="2026-09-20"]');
+  await spaceDay.focus();
+  await page.keyboard.press('Space');
+  await expect(page.locator('#scheduleDialogTitle')).toHaveText('添加课程');
+  await expect(page.locator('#scheduleForm [name=date]')).toHaveValue('2026-09-20');
+});
+
+test('calendar still blocks overlapping lessons and stays within a 390px viewport', async ({ page }) => {
+  await page.locator('#emptyAddButton').click();
+  await page.locator('#studentForm [name=name]').fill('冲突检测学生');
+  await page.getByRole('button', { name: '保存档案' }).click();
+  await page.locator('#studentScheduleButton').click();
   await page.locator('#scheduleForm [name=title]').fill('数学辅导');
   await page.locator('#scheduleForm [name=date]').fill('2026-09-15');
   await page.locator('#scheduleForm [name=startTime]').fill('10:00');
   await page.locator('#scheduleForm [name=endTime]').fill('11:00');
   await page.getByRole('button', { name: '保存课程' }).click();
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('zhixing-tutor-students-v1')).students[0].scheduleEntries.length)).toBe(1);
-  await page.locator('#addScheduleBtn').click();
+  await page.locator('#studentScheduleButton').click();
   await page.locator('#scheduleForm [name=title]').fill('冲突课程');
   await page.locator('#scheduleForm [name=date]').fill('2026-09-15');
   await page.locator('#scheduleForm [name=startTime]').fill('10:30');
   await page.locator('#scheduleForm [name=endTime]').fill('11:30');
   await page.getByRole('button', { name: '保存课程' }).click();
   await expect(page.locator('#scheduleMessage')).toContainText('时间冲突');
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('zhixing-tutor-students-v1')).students[0].scheduleEntries.length)).toBe(1);
+  await expect.poll(() => page.evaluate(() => active().scheduleEntries.length)).toBe(1);
+  await page.locator('#cancelScheduleDialog').click();
+  await expect(page.locator('#confirmDialog')).toHaveAttribute('open', '');
+  await page.locator('#confirmAccept').click();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => { calendarCursor = new Date(2026, 8, 1); });
+  await page.locator('#openStudentCalendarButton').click();
+  await expect(page.locator('#calendarAgenda')).toBeVisible();
+  const overflow = await page.evaluate(() => ({
+    page: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    dialog: document.querySelector('#calendarDialog').scrollWidth > document.querySelector('#calendarDialog').clientWidth,
+    shell: document.querySelector('#calendarDialog .calendar-shell').scrollWidth > document.querySelector('#calendarDialog .calendar-shell').clientWidth
+  }));
+  expect(overflow).toEqual({ page: false, dialog: false, shell: false });
 });
 
 test('Escape and backdrop follow the same safe dialog close rules', async ({ page }) => {
