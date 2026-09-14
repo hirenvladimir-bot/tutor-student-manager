@@ -18,14 +18,20 @@
     try { const parsed = JSON.parse(value.slice(bundlePrefix.length)); return normalizeScheduleEntries(parsed.schedules); }
     catch { return []; }
   }
+  function decodeWeeklySchedules(value) {
+    if (typeof value !== 'string' || !value.startsWith(bundlePrefix)) return null;
+    try { const parsed = JSON.parse(value.slice(bundlePrefix.length)); return normalizeWeeklySchedules(parsed.weeklySchedules); }
+    catch { return []; }
+  }
   function encodeNoteEntries(entries, legacy = '') { return Array.isArray(entries) ? `${notePrefix}${JSON.stringify(entries)}` : (legacy || ''); }
-  function encodeStudentBundle(notes, schedules, legacy = '') {
-    if (!Array.isArray(notes) && !Array.isArray(schedules)) return legacy || '';
+  function encodeStudentBundle(notes, schedules, legacy = '', weeklySchedules) {
+    if (!Array.isArray(notes) && !Array.isArray(schedules) && !Array.isArray(weeklySchedules)) return legacy || '';
     const fallbackNotes = Array.isArray(notes) ? notes : (decodeNoteEntries(legacy) || (legacy ? [{ id: 'legacy-note', text: legacy, createdAt: '1970-01-01T00:00:00.000Z' }] : []));
-    return `${bundlePrefix}${JSON.stringify({ notes: normalizeNoteEntries(fallbackNotes), schedules: normalizeScheduleEntries(schedules) })}`;
+    return `${bundlePrefix}${JSON.stringify({ notes: normalizeNoteEntries(fallbackNotes), schedules: normalizeScheduleEntries(schedules), weeklySchedules: normalizeWeeklySchedules(weeklySchedules) })}`;
   }
   function normalizeNoteEntries(entries) { return (Array.isArray(entries) ? entries : []).map(item => ({ id: item.id || uuid(), text: String(item.text || '').trim(), createdAt: item.createdAt || new Date().toISOString() })).filter(item => item.text); }
   function normalizeScheduleEntries(entries) { return (Array.isArray(entries) ? entries : []).map(item => ({ id: item.id || uuid(), title: String(item.title || '课程').trim() || '课程', startAt: item.startAt || '', endAt: item.endAt || '', note: String(item.note || '').trim(), createdAt: item.createdAt || new Date().toISOString() })).filter(item => item.startAt && item.endAt); }
+  function normalizeWeeklySchedules(entries) { return (Array.isArray(entries) ? entries : []).map(item => ({ id: item.id || uuid(), title: String(item.title || '课程辅导').trim() || '课程辅导', weekday: Math.min(7, Math.max(1, Number(item.weekday) || 1)), startTime: String(item.startTime || ''), endTime: String(item.endTime || ''), note: String(item.note || '').trim(), createdAt: item.createdAt || new Date().toISOString() })).filter(item => /^\d{2}:\d{2}$/.test(item.startTime) && /^\d{2}:\d{2}$/.test(item.endTime) && item.endTime > item.startTime); }
 
   function ensureIds(state) {
     const next = clone(state || { students: [], activeId: null });
@@ -40,6 +46,8 @@
       if (Array.isArray(student.focusContentEntries)) student.focusContentEntries = normalizeNoteEntries(student.focusContentEntries);
       if (Array.isArray(student.scheduleEntries)) student.scheduleEntries = normalizeScheduleEntries(student.scheduleEntries);
       else if (decodeScheduleEntries(student.nextLesson)) student.scheduleEntries = decodeScheduleEntries(student.nextLesson);
+      if (Array.isArray(student.weeklySchedules)) student.weeklySchedules = normalizeWeeklySchedules(student.weeklySchedules);
+      else student.weeklySchedules = decodeWeeklySchedules(student.nextLesson) || [];
       student.scores.forEach(item => item.id ||= uuid());
       student.preparations.forEach(item => item.id ||= uuid());
       student.courseProgress.forEach(item => item.id ||= uuid());
@@ -61,7 +69,7 @@
     });
     ensureIds(state).students.forEach(student => {
       const profile = own(student, ['name', 'school', 'targetSchool', 'currentScore', 'targetScore']);
-      profile.nextLesson = student.scheduleEntries?.length ? encodeStudentBundle(student.nextLessonEntries, student.scheduleEntries, student.nextLesson) : encodeNoteEntries(student.nextLessonEntries, student.nextLesson);
+      profile.nextLesson = student.scheduleEntries?.length || student.weeklySchedules?.length ? encodeStudentBundle(student.nextLessonEntries, student.scheduleEntries, student.nextLesson, student.weeklySchedules) : encodeNoteEntries(student.nextLessonEntries, student.nextLesson);
       profile.focusContent = encodeNoteEntries(student.focusContentEntries, student.focusContent);
       put('students', student.id, null, profile, student._version);
       student.scores.forEach(item => put('scores', item.id, student.id, own(item, ['label', 'date', 'score']), item._version));
@@ -81,9 +89,10 @@
   function hydrate(records, activeId = null) {
     const live = [...records.values()].filter(r => !r.deletedAt);
     const students = live.filter(r => r.entity === 'students').map(r => {
-      const data = clone(r.data), nextLessonEntries = decodeNoteEntries(data.nextLesson), scheduleEntries = decodeScheduleEntries(data.nextLesson), focusContentEntries = decodeNoteEntries(data.focusContent);
+      const data = clone(r.data), nextLessonEntries = decodeNoteEntries(data.nextLesson), scheduleEntries = decodeScheduleEntries(data.nextLesson), weeklySchedules = decodeWeeklySchedules(data.nextLesson), focusContentEntries = decodeNoteEntries(data.focusContent);
       if (nextLessonEntries) { data.nextLessonEntries = normalizeNoteEntries(nextLessonEntries); data.nextLesson = ''; }
       data.scheduleEntries = normalizeScheduleEntries(scheduleEntries);
+      data.weeklySchedules = normalizeWeeklySchedules(weeklySchedules);
       if (focusContentEntries) { data.focusContentEntries = normalizeNoteEntries(focusContentEntries); data.focusContent = ''; }
       return { id: r.id, ...data, _version: r.version, scores: [], preparations: [], courseProgress: [], custom: [] };
     });
@@ -133,5 +142,5 @@
     return changes;
   }
 
-  ZX.Model = { entityOrder, clone, ensureIds, flatten, hydrate, diff, decodeNoteEntries, decodeScheduleEntries, encodeNoteEntries, encodeStudentBundle, normalizeNoteEntries, normalizeScheduleEntries };
+  ZX.Model = { entityOrder, clone, ensureIds, flatten, hydrate, diff, decodeNoteEntries, decodeScheduleEntries, decodeWeeklySchedules, encodeNoteEntries, encodeStudentBundle, normalizeNoteEntries, normalizeScheduleEntries, normalizeWeeklySchedules };
 })(window);

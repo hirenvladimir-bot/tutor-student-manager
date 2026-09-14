@@ -56,6 +56,17 @@ test('calendar entries round-trip through the existing student record without to
   assert.deepEqual(Array.from(changes, item => item.entity), ['students']);
 });
 
+test('weekly schedules round-trip as one student rule instead of repeated lesson records', () => {
+  const original = fixture();
+  original.students[0].weeklySchedules = [{ id: 'weekly-a', title: '每周数学', weekday: 6, startTime: '09:30', endTime: '11:00', note: '带作业', createdAt: '2026-09-14T08:00:00.000Z' }];
+  const records = Model.flatten(original);
+  const encoded = records.get('students:11111111-1111-4111-8111-111111111111').data.nextLesson;
+  assert.match(encoded, /weeklySchedules/);
+  const restored = Model.hydrate(records, original.activeId);
+  assert.equal(JSON.stringify(restored.students[0].weeklySchedules), JSON.stringify(original.students[0].weeklySchedules));
+  assert.equal([...records.values()].filter(item => item.entity === 'students').length, 1);
+});
+
 test('legacy data-url attachments survive v2 normalization', () => {
   const original = fixture();
   original.students[0].preparations[0].files[0] = { id: '55555555-5555-4555-8555-555555555555', name: '旧讲义.txt', type: 'text/plain', data: 'data:text/plain;base64,5YaF5a65' };

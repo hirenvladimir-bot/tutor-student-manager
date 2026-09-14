@@ -49,3 +49,14 @@ test('calendar entries survive readable Markdown export and import', () => {
   assert.equal(restored.note, '带试卷');
   assert.equal(restored.startAt, '2026-09-14T08:00:00.000Z');
 });
+
+test('fixed weekly lessons survive readable Markdown export and import', () => {
+  const scheduled = structuredClone(fixture);
+  scheduled.students[0].weeklySchedules = [{ id: 'weekly-a', title: '每周生物', weekday: 7, startTime: '15:00', endTime: '16:30', note: '带讲义', createdAt: '2026-09-14T08:00:00.000Z' }];
+  const readable = Portable.markdown(scheduled, true).replace(/\n\n\[\[ZHIXING_V2:[A-Za-z0-9+/=]+\]\]\s*$/, '');
+  const restored = Portable.parse(readable).students[0].weeklySchedules[0];
+  assert.equal(restored.title, '每周生物');
+  assert.equal(restored.weekday, 7);
+  assert.equal(restored.startTime, '15:00');
+  assert.equal(restored.endTime, '16:30');
+});

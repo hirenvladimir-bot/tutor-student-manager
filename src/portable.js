@@ -16,6 +16,9 @@
   const scheduleLines = (student, bullet) => (student.scheduleEntries || []).map(item =>
     `${bullet}上课时间｜${item.startAt}｜${item.endAt}｜${item.title || '课程'}｜${item.note || ''}`
   ).join('\n') || `${bullet}暂无`;
+  const weeklyScheduleLines = (student, bullet) => (student.weeklySchedules || []).map(item =>
+    `${bullet}每周课程｜${item.weekday}｜${item.startTime}｜${item.endTime}｜${item.title || '课程'}｜${item.note || ''}`
+  ).join('\n') || `${bullet}暂无`;
 
   function studentText(student, plain = false) {
     const bullet = plain ? '' : '- ';
@@ -27,7 +30,7 @@
       : `| ${item.date} | ${item.label} | ${item.score} |`
     ).join('\n') || `${bullet}暂无`;
     const custom = (student.custom || []).map(item => `${bullet}${item.key}：${item.value}`).join('\n') || `${bullet}暂无`;
-    return `${plain ? '学生：' : '## '}${student.name}\n${bullet}就读学校：${student.school || ''}\n${bullet}目标学校：${student.targetSchool || ''}\n${bullet}目前分数：${student.currentScore ?? ''}\n${bullet}目标分数：${student.targetScore ?? ''}\n\n${plain ? '考试成绩：' : '### 考试成绩'}\n${plain ? '日期｜考试｜分数\n' : ''}${scores}\n\n${plain ? '排课日历：' : '### 排课日历'}\n${scheduleLines(student, bullet)}\n\n${plain ? '备课记录：' : '### 备课记录'}\n${records(student.preparations, '暂无')}\n\n${plain ? '课程进度：' : '### 课程进度'}\n${records(student.courseProgress, '暂无')}\n\n${plain ? '教学备忘：' : '### 教学备忘'}\n${noteLines(student, 'nextLesson', '下节课要讲的内容', bullet)}\n${noteLines(student, 'focusContent', '着重要听的内容', bullet)}\n\n${plain ? '其他信息：' : '### 其他信息'}\n${custom}`;
+    return `${plain ? '学生：' : '## '}${student.name}\n${bullet}就读学校：${student.school || ''}\n${bullet}目标学校：${student.targetSchool || ''}\n${bullet}目前分数：${student.currentScore ?? ''}\n${bullet}目标分数：${student.targetScore ?? ''}\n\n${plain ? '考试成绩：' : '### 考试成绩'}\n${plain ? '日期｜考试｜分数\n' : ''}${scores}\n\n${plain ? '固定周课程：' : '### 固定周课程'}\n${weeklyScheduleLines(student, bullet)}\n\n${plain ? '排课日历：' : '### 排课日历'}\n${scheduleLines(student, bullet)}\n\n${plain ? '备课记录：' : '### 备课记录'}\n${records(student.preparations, '暂无')}\n\n${plain ? '课程进度：' : '### 课程进度'}\n${records(student.courseProgress, '暂无')}\n\n${plain ? '教学备忘：' : '### 教学备忘'}\n${noteLines(student, 'nextLesson', '下节课要讲的内容', bullet)}\n${noteLines(student, 'focusContent', '着重要听的内容', bullet)}\n\n${plain ? '其他信息：' : '### 其他信息'}\n${custom}`;
   }
 
   function encode(state) {
@@ -53,7 +56,7 @@
     const blocks = text.split(/(?:^|\n)(?:##\s+|学生[：:])/).slice(1);
     const students = blocks.map(block => {
       const lines = block.split('\n').map(value => value.trim()).filter(Boolean);
-      const student = { id: root.crypto.randomUUID(), name: (lines.shift() || '未命名学生').replace(/^#+\s*/, '').trim(), school: '', targetSchool: '', currentScore: null, targetScore: null, scores: [], custom: [], courseProgress: [], preparations: [], nextLesson: '', focusContent: '', nextLessonEntries: [], focusContentEntries: [], scheduleEntries: [] };
+      const student = { id: root.crypto.randomUUID(), name: (lines.shift() || '未命名学生').replace(/^#+\s*/, '').trim(), school: '', targetSchool: '', currentScore: null, targetScore: null, scores: [], custom: [], courseProgress: [], preparations: [], nextLesson: '', focusContent: '', nextLessonEntries: [], focusContentEntries: [], scheduleEntries: [], weeklySchedules: [] };
       let section = 'profile', lastRecord = null;
       const addRecord = (list, clean) => {
         const match = clean.match(/^(.+?)[：:]\s*(.*)$/), date = match?.[1] || '', raw = match?.[2] || clean;
@@ -63,6 +66,7 @@
       };
       for (const line of lines) {
         if (/^###\s*考试成绩|^考试成绩[：:]?$/.test(line)) { section = 'scores'; lastRecord = null; continue; }
+        if (/^###\s*固定周课程|^固定周课程[：:]?$/.test(line)) { section = 'weeklySchedules'; lastRecord = null; continue; }
         if (/^###\s*排课日历|^排课日历[：:]?$/.test(line)) { section = 'schedules'; lastRecord = null; continue; }
         if (/^###\s*备课记录|^备课记录[：:]?$/.test(line)) { section = 'preparations'; lastRecord = null; continue; }
         if (/^###\s*课程进度|^课程进度[：:]?$/.test(line)) { section = 'course'; lastRecord = null; continue; }
@@ -96,6 +100,11 @@
         if (section === 'schedules' && clean.startsWith('上课时间｜')) {
           const [, startAt, endAt, title, note] = clean.split('｜');
           if (startAt && endAt) student.scheduleEntries.push({ id: root.crypto.randomUUID(), startAt: startAt.trim(), endAt: endAt.trim(), title: (title || '课程').trim(), note: (note || '').trim(), createdAt: new Date().toISOString() });
+          continue;
+        }
+        if (section === 'weeklySchedules' && clean.startsWith('每周课程｜')) {
+          const [, weekday, startTime, endTime, title, note] = clean.split('｜');
+          if (weekday && startTime && endTime) student.weeklySchedules.push({ id: root.crypto.randomUUID(), weekday: Number(weekday), startTime: startTime.trim(), endTime: endTime.trim(), title: (title || '课程').trim(), note: (note || '').trim(), createdAt: new Date().toISOString() });
           continue;
         }
         if (section === 'preparations') { addRecord(student.preparations, clean); continue; }
