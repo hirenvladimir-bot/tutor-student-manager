@@ -26,14 +26,43 @@
   }
   function comparable(data) { const value = { ...(data || {}) }; delete value.pending; delete value.localBlobKey; delete value.uploadPath; return JSON.stringify(Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]))); }
   function sameOperation(local, cloud) { return local?.operation === (cloud?.deletedAt ? 'delete' : 'upsert'); }
+  function canonicalOwnerType(value) {
+    const normalized = String(value || '').toLowerCase().replace(/[\s_-]+/g, '');
+    if (['course', 'courseprogress', 'progress'].includes(normalized)) return 'course_progress';
+    if (['prep', 'preparation', 'preparations'].includes(normalized)) return 'preparations';
+    return normalized;
+  }
+  function canonicalRelativePath(value, name) {
+    const normalized = String(value || '').replace(/\\/g, '/').replace(/^\.\//, '');
+    return normalized === String(name || '').replace(/\\/g, '/') ? '' : normalized;
+  }
+  function sameWhenPresent(left, right, normalize = value => String(value)) {
+    const hasLeft = left !== undefined && left !== null && left !== '';
+    const hasRight = right !== undefined && right !== null && right !== '';
+    return !hasLeft || !hasRight || normalize(left) === normalize(right);
+  }
   function sameAttachmentIdentity(local, cloud) {
     if (local?.entity !== 'attachments' || local.operation !== 'upsert' || !cloud?.data?.path) return false;
-    const fields = ['ownerType', 'ownerId', 'name', 'relativePath', 'type', 'size', 'data'];
-    return fields.every(field => String(local.data?.[field] ?? '') === String(cloud.data?.[field] ?? ''));
+    const left = local.data || {}, right = cloud.data || {};
+    const localPath = left.path || left.uploadPath || '';
+    return (!localPath || localPath === right.path)
+      && sameWhenPresent(local.studentId, cloud.studentId)
+      && sameWhenPresent(left.ownerId, right.ownerId)
+      && sameWhenPresent(left.ownerType, right.ownerType, canonicalOwnerType)
+      && String(left.name || '').normalize('NFC') === String(right.name || '').normalize('NFC')
+      && sameWhenPresent(canonicalRelativePath(left.relativePath, left.name), canonicalRelativePath(right.relativePath, right.name))
+      && sameWhenPresent(left.type, right.type, value => String(value).toLowerCase())
+      && sameWhenPresent(left.size, right.size, value => Number(value || 0))
+      && sameWhenPresent(left.data, right.data);
+  }
+  function isSafeLegacyAttachmentRetry(local, cloud) {
+    if (!sameAttachmentIdentity(local, cloud) || local.data?.localBlobKey || cloud.deletedAt) return false;
+    const localPath = local.data?.path || local.data?.uploadPath || '';
+    return !localPath || localPath === cloud.data.path;
   }
   function isEquivalentMutation(local, cloud) { return Boolean(local && cloud && sameOperation(local, cloud) && (comparable(local.data) === comparable(cloud.data) || sameAttachmentIdentity(local, cloud))); }
-  async function acceptEquivalent(local, cloud) {
-    if (local.entity === 'attachments') await ZX.Files.discardConflict({ local, cloud });
+  async function acceptEquivalent(local, cloud, preserveStorage = false) {
+    if (local.entity === 'attachments') await ZX.Files.discardConflict({ local, cloud }, { preserveStorage });
     await ZX.Database.applyServerRecord(cloud);
     await ZX.Database.remove('outbox', local.key);
     await ZX.Database.remove('conflicts', local.key);
@@ -50,13 +79,15 @@
       for (const row of data || []) {
         const remote = decode(entity, row);
         const localMutation = await ZX.Database.get('outbox', remote.key);
-        if (localMutation && remote.version > localMutation.baseVersion && isEquivalentMutation(localMutation, remote)) {
+        if (localMutation && isSafeLegacyAttachmentRetry(localMutation, remote)) {
+          await acceptEquivalent(localMutation, remote, true); knownConflicts.delete(remote.key);
+        } else if (localMutation && remote.version > localMutation.baseVersion && isEquivalentMutation(localMutation, remote)) {
           await acceptEquivalent(localMutation, remote); knownConflicts.delete(remote.key);
         } else if (localMutation && remote.version > localMutation.baseVersion) {
           await ZX.Database.saveConflict({ key: remote.key, entity, id: remote.id, local: localMutation, cloud: remote });
         } else if (!localMutation) {
           const stale = knownConflicts.get(remote.key);
-          if (stale?.local?.entity === 'attachments') await ZX.Files.discardConflict({ ...stale, cloud: remote });
+          if (stale?.local?.entity === 'attachments') await ZX.Files.discardConflict({ ...stale, cloud: remote }, { preserveStorage: true });
           if (stale) await ZX.Database.remove('conflicts', remote.key);
           await ZX.Database.applyServerRecord(remote);
         }
@@ -105,7 +136,8 @@
         const equivalent = [];
         for (const conflict of data?.conflicts || []) {
           const local = ready.find(x => x.key === conflict.key);
-          if (isEquivalentMutation(local, conflict.cloud)) { await acceptEquivalent(local, conflict.cloud); equivalent.push(local); }
+          if (isSafeLegacyAttachmentRetry(local, conflict.cloud)) { await acceptEquivalent(local, conflict.cloud, true); equivalent.push(local); }
+          else if (isEquivalentMutation(local, conflict.cloud)) { await acceptEquivalent(local, conflict.cloud); equivalent.push(local); }
           else await ZX.Database.saveConflict({ ...conflict, local });
         }
         if (equivalent.length) await ZX.Files.afterApplied(equivalent.map(item => ({ key: item.key })), equivalent);

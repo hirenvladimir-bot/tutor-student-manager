@@ -144,6 +144,39 @@ test('an already-applied attachment retry converges without creating or retainin
   assert.equal(await ZX.Database.get('conflicts', local.key), undefined, 'a stale conflict without an outbox mutation must be removed');
 });
 
+test('legacy attachment metadata aliases converge and do not delete Storage objects', async () => {
+  const ZX = loadDevice(), userId = 'cacacaca-caca-4aca-8aca-cacacacacaca', cloud = mockCloud(userId);
+  await startDevice(ZX, cloud.client, { students: [], activeId: null });
+  const id = '10101010-1010-4010-8010-101010101010', studentId = '20202020-2020-4020-8020-202020202020', ownerId = '30303030-3030-4030-8030-303030303030', key = `attachments:${id}`;
+  const row = { id, user_id: userId, student_id: studentId, owner_type: 'course_progress', owner_id: ownerId, name: '旧讲义.pdf', relative_path: '', mime_type: 'application/pdf', size: 321, storage_path: `${userId}/${studentId}/旧讲义.pdf`, legacy_data: '', version: 2, deleted_at: null, updated_at: new Date().toISOString() };
+  cloud.rows.set(key, row);
+  const local = { key, entity: 'attachments', id, studentId, data: { ownerType: 'course-progress', ownerId, name: '旧讲义.pdf', relativePath: '旧讲义.pdf', type: '', size: '', path: '', data: '', pending: false, localBlobKey: '' }, version: 1, baseVersion: 1, operation: 'upsert', attempts: 0 };
+  await ZX.Database.put('outbox', local);
+  await ZX.Database.saveConflict({ key, entity: 'attachments', id, local, cloud: { key, entity: 'attachments', id, studentId, data: {}, version: 2 } });
+
+  await ZX.Sync.pull();
+
+  assert.equal(await ZX.Database.get('outbox', key), undefined);
+  assert.equal(await ZX.Database.get('conflicts', key), undefined);
+  assert.equal((await ZX.Database.get('records', key)).data.path, row.storage_path);
+  assert.equal((await ZX.Database.all('cleanup')).length, 0, 'legacy convergence must never schedule an unverified Storage deletion');
+});
+
+test('attachment conflicts with two different cloud paths remain for manual review', async () => {
+  const ZX = loadDevice(), userId = 'cbcbcbcb-cbcb-4bcb-8bcb-cbcbcbcbcbcb', cloud = mockCloud(userId);
+  await startDevice(ZX, cloud.client, { students: [], activeId: null });
+  const id = '40404040-4040-4040-8040-404040404040', studentId = '50505050-5050-4050-8050-505050505050', ownerId = '60606060-6060-4060-8060-606060606060', key = `attachments:${id}`;
+  cloud.rows.set(key, { id, user_id: userId, student_id: studentId, owner_type: 'preparations', owner_id: ownerId, name: '冲突.pdf', relative_path: '', mime_type: 'application/pdf', size: 10, storage_path: `${userId}/cloud.pdf`, legacy_data: '', version: 2, deleted_at: null, updated_at: new Date().toISOString() });
+  const local = { key, entity: 'attachments', id, studentId, data: { ownerType: 'preparations', ownerId, name: '冲突.pdf', relativePath: '', type: 'application/pdf', size: 10, path: `${userId}/local.pdf`, data: '', pending: false, localBlobKey: '' }, version: 1, baseVersion: 1, operation: 'upsert', attempts: 0 };
+  await ZX.Database.put('outbox', local);
+
+  await ZX.Sync.pull();
+
+  assert.ok(await ZX.Database.get('conflicts', key));
+  assert.ok(await ZX.Database.get('outbox', key));
+  assert.equal((await ZX.Database.all('cleanup')).length, 0);
+});
+
 test('pull re-reads the latest attachment mutation after an upload completes concurrently', async () => {
   const ZX = loadDevice(), userId = 'adadadad-adad-4dad-8dad-adadadadadad', cloud = mockCloud(userId);
   await startDevice(ZX, cloud.client, { students: [], activeId: null });

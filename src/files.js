@@ -164,11 +164,11 @@
     }
     await processCleanup();
   }
-  async function discardConflict(conflict) {
+  async function discardConflict(conflict, options = {}) {
     const local = conflict?.local;
     if (local?.entity !== 'attachments') return;
     if (local.data?.localBlobKey) await ZX.Database.remove('blobs', local.data.localBlobKey);
-    if (local.data?.path && local.data.path !== conflict.cloud?.data?.path) await queueCleanup(local.data.path);
+    if (!options.preserveStorage && local.data?.path && local.data.path !== conflict.cloud?.data?.path) await queueCleanup(local.data.path);
   }
   ZX.Files = { configure, prepare, beforeSync, afterApplied, queueCleanup, processCleanup, discardConflict, cancel, clearLocal, diagnose };
 })(window);
