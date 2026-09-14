@@ -62,8 +62,8 @@
     await put('records', stored);
     baseline.set(stored.key, stored);
   }
-  async function markApplied(key, version, updatedAt) {
-    const record = baseline.get(key);
+  async function markApplied(key, version, updatedAt, appliedRecord = null) {
+    const record = appliedRecord || baseline.get(key);
     if (record) await applyServerRecord({ ...record, version, updatedAt });
     await remove('outbox', key);
   }

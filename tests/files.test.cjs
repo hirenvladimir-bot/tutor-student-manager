@@ -105,6 +105,7 @@ test('an already uploaded attachment is never uploaded or reported complete agai
   await ZX.Files.afterApplied([{ key: mutation.key }], [ready]);
   assert.equal(uploadConstructed, 0);
   assert.equal(ready.data.localBlobKey, undefined);
+  assert.equal((await ZX.Database.get('records', mutation.key)).data.localBlobKey, undefined);
   assert.equal(events.length, 0);
 });
 

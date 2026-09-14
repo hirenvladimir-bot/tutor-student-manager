@@ -119,7 +119,12 @@
     const changes = [];
     current.forEach((record, key) => {
       const old = previous.get(key);
-      const changed = !old || JSON.stringify(old.data) !== JSON.stringify(record.data) || old.deletedAt !== record.deletedAt;
+      const comparableData = item => {
+        const data = clone(item.data || {});
+        if (item.entity === 'attachments') { delete data.pending; delete data.localBlobKey; delete data.uploadPath; }
+        return JSON.stringify(data);
+      };
+      const changed = !old || comparableData(old) !== comparableData(record) || old.deletedAt !== record.deletedAt;
       if (changed) changes.push({ ...record, baseVersion: old?.version || 0, operation: record.deletedAt ? 'delete' : 'upsert' });
     });
     previous.forEach((old, key) => {

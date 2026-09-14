@@ -19,11 +19,12 @@ function mockCloud(userId) {
   const now = () => new Date().toISOString();
   const record = (entity, row) => ({
     key: `${entity}:${row.id}`, entity, id: row.id, studentId: row.student_id || null,
-    data: entity === 'students' ? { name: row.name, school: row.school, targetSchool: row.target_school, currentScore: row.current_score, targetScore: row.target_score, nextLesson: row.next_lesson, focusContent: row.focus_content } : {},
+    data: entity === 'students' ? { name: row.name, school: row.school, targetSchool: row.target_school, currentScore: row.current_score, targetScore: row.target_score, nextLesson: row.next_lesson, focusContent: row.focus_content } : entity === 'attachments' ? { ownerType: row.owner_type, ownerId: row.owner_id, name: row.name, relativePath: row.relative_path || '', type: row.mime_type || 'application/octet-stream', size: Number(row.size || 0), path: row.storage_path || '', data: row.legacy_data || '', pending: false, localBlobKey: '' } : {},
     version: row.version, deletedAt: row.deleted_at, updatedAt: row.updated_at
   });
   function studentRow(mutation, version) {
     const d = mutation.data;
+    if (mutation.entity === 'attachments') return { id: mutation.id, user_id: userId, student_id: mutation.student_id, owner_type: d.ownerType, owner_id: d.ownerId, name: d.name || '', relative_path: d.relativePath || '', mime_type: d.type || 'application/octet-stream', size: Number(d.size || 0), storage_path: d.path || '', legacy_data: d.data || '', version, deleted_at: mutation.operation === 'delete' ? now() : null, updated_at: now() };
     return { id: mutation.id, user_id: userId, name: d.name || '', school: d.school || '', target_school: d.targetSchool || '', current_score: d.currentScore ?? null, target_score: d.targetScore ?? null, next_lesson: d.nextLesson || '', focus_content: d.focusContent || '', version, deleted_at: mutation.operation === 'delete' ? now() : null, updated_at: now() };
   }
   const client = {
@@ -123,6 +124,46 @@ test('conflicted records pause in the outbox until the user resolves them', asyn
   await ZX.Sync.sync();
   assert.equal(scheduled.length, timersBeforeSync, 'a conflict alone must not schedule a tight retry loop');
   assert.equal((await ZX.Database.get('outbox', `students:${studentId}`)).data.name, '本机冲突版');
+});
+
+test('an already-applied attachment retry converges without creating or retaining a conflict', async () => {
+  const ZX = loadDevice(), userId = 'acacacac-acac-4cac-8cac-acacacacacac', cloud = mockCloud(userId);
+  await startDevice(ZX, cloud.client, { students: [], activeId: null });
+  const id = '34343434-3434-4434-8434-343434343434', studentId = '45454545-4545-4454-8454-454545454545', ownerId = '56565656-5656-4656-8656-565656565656';
+  const data = { ownerType: 'preparations', ownerId, name: '已上传.pdf', relativePath: '', type: 'application/pdf', size: 123, path: `${userId}/${studentId}/file.pdf`, data: '', pending: false, localBlobKey: '', uploadPath: '' };
+  const row = { id, user_id: userId, student_id: studentId, owner_type: data.ownerType, owner_id: ownerId, name: data.name, relative_path: '', mime_type: data.type, size: data.size, storage_path: data.path, legacy_data: '', version: 1, deleted_at: null, updated_at: new Date().toISOString() };
+  cloud.rows.set(`attachments:${id}`, row);
+  const local = { key: `attachments:${id}`, entity: 'attachments', id, studentId, data, version: 0, baseVersion: 0, operation: 'upsert', attempts: 0 };
+  await ZX.Database.put('outbox', local);
+  await ZX.Sync.flush();
+  assert.equal(await ZX.Database.get('outbox', local.key), undefined);
+  assert.equal(await ZX.Database.get('conflicts', local.key), undefined);
+  assert.equal((await ZX.Database.get('records', local.key)).version, 1);
+  await ZX.Database.saveConflict({ key: local.key, entity: 'attachments', id, local, cloud: { key: local.key, entity: 'attachments', id, studentId, data, version: 1, deletedAt: null, updatedAt: row.updated_at } });
+  await ZX.Sync.pull();
+  assert.equal(await ZX.Database.get('conflicts', local.key), undefined, 'a stale conflict without an outbox mutation must be removed');
+});
+
+test('pull re-reads the latest attachment mutation after an upload completes concurrently', async () => {
+  const ZX = loadDevice(), userId = 'adadadad-adad-4dad-8dad-adadadadadad', cloud = mockCloud(userId);
+  await startDevice(ZX, cloud.client, { students: [], activeId: null });
+  const id = '67676767-6767-4767-8767-676767676767', studentId = '78787878-7878-4787-8787-787878787878', ownerId = '89898989-8989-4989-8989-898989898989', key = `attachments:${id}`;
+  const pending = { key, entity: 'attachments', id, studentId, data: { ownerType: 'preparations', ownerId, name: '并发.pdf', relativePath: '', type: 'application/pdf', size: 9, path: '', data: '', pending: true, localBlobKey: 'blob:pending', uploadPath: 'reserved/path.pdf' }, version: 0, baseVersion: 0, operation: 'upsert', attempts: 0 };
+  await ZX.Database.put('outbox', pending);
+  let release, selected;
+  const waiting = new Promise(resolve => { release = resolve; }), reached = new Promise(resolve => { selected = resolve; }), originalFrom = cloud.client.from;
+  cloud.client.from = table => table === 'attachments' ? { select: () => ({ eq: async () => { selected(); await waiting; return { data: [...cloud.rows.values()].filter(row => row.owner_type), error: null }; } }) } : originalFrom(table);
+  const pulling = ZX.Sync.pull();
+  await reached;
+  const path = `${userId}/${studentId}/uploaded.pdf`, completedData = { ...pending.data, path, pending: false };
+  delete completedData.localBlobKey; delete completedData.uploadPath;
+  cloud.rows.set(key, { id, user_id: userId, student_id: studentId, owner_type: 'preparations', owner_id: ownerId, name: '并发.pdf', relative_path: '', mime_type: 'application/pdf', size: 9, storage_path: path, legacy_data: '', version: 1, deleted_at: null, updated_at: new Date().toISOString() });
+  await ZX.Database.put('outbox', { ...pending, data: completedData });
+  release();
+  await pulling;
+  assert.equal(await ZX.Database.get('outbox', key), undefined);
+  assert.equal(await ZX.Database.get('conflicts', key), undefined);
+  assert.equal((await ZX.Database.get('records', key)).data.path, path);
 });
 
 test('failed online synchronization schedules an automatic retry', async () => {

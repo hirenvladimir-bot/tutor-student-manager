@@ -110,7 +110,10 @@
       delete data.localBlobKey;
       delete data.uploadPath;
       data.pending = false;
-      return { ...mutation, data };
+      const cleaned = { ...mutation, data };
+      await ZX.Database.applyServerRecord({ ...cleaned, version: mutation.baseVersion, deletedAt: null });
+      await ZX.Database.put('outbox', cleaned);
+      return cleaned;
     }
     if (!mutation.data.path && mutation.data.localBlobKey) {
       const detail = { key: mutation.key, id: mutation.id, name: mutation.data.name, state: 'queued', percent: 0 };

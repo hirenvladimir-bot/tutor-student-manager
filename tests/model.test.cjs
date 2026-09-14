@@ -70,6 +70,14 @@ test('pending attachment upload paths survive local model round-trips', () => {
   assert.equal(restored.students[0].preparations[0].files[0].uploadPath, 'user/student/preparations/prep/file.pdf');
 });
 
+test('cloud-shaped attachments do not become changes because of local upload-only fields', () => {
+  const before = Model.flatten(fixture());
+  const attachment = before.get('attachments:55555555-5555-4555-8555-555555555555');
+  delete attachment.data.uploadPath;
+  const restored = Model.hydrate(before, fixture().activeId);
+  assert.equal(Model.diff(before, Model.flatten(restored)).length, 0);
+});
+
 test('diff isolates record edits and creates tombstones for deletions', () => {
   const before = Model.flatten(fixture());
   const changed = fixture(); changed.students[0].scores[0].score = 90;

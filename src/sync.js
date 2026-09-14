@@ -8,6 +8,7 @@
   let onState = () => {};
   let onStatus = () => {};
   let running = false;
+  let pullPromise = null;
   let retryCount = 0;
   const MAX_ATTEMPTS = 6;
   const BATCH_SIZE = 20;
@@ -24,26 +25,49 @@
     return { key: `${entity}:${row.id}`, entity, id: row.id, studentId: row.student_id || null, data: camel[entity](row), version: Number(row.version || 0), deletedAt: row.deleted_at || null, updatedAt: row.updated_at };
   }
   function comparable(data) { const value = { ...(data || {}) }; delete value.pending; delete value.localBlobKey; delete value.uploadPath; return JSON.stringify(Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]))); }
+  function sameOperation(local, cloud) { return local?.operation === (cloud?.deletedAt ? 'delete' : 'upsert'); }
+  function sameAttachmentIdentity(local, cloud) {
+    if (local?.entity !== 'attachments' || local.operation !== 'upsert' || !cloud?.data?.path) return false;
+    const fields = ['ownerType', 'ownerId', 'name', 'relativePath', 'type', 'size', 'data'];
+    return fields.every(field => String(local.data?.[field] ?? '') === String(cloud.data?.[field] ?? ''));
+  }
+  function isEquivalentMutation(local, cloud) { return Boolean(local && cloud && sameOperation(local, cloud) && (comparable(local.data) === comparable(cloud.data) || sameAttachmentIdentity(local, cloud))); }
+  async function acceptEquivalent(local, cloud) {
+    if (local.entity === 'attachments') await ZX.Files.discardConflict({ local, cloud });
+    await ZX.Database.applyServerRecord(cloud);
+    await ZX.Database.remove('outbox', local.key);
+    await ZX.Database.remove('conflicts', local.key);
+  }
   function online() { return navigator.onLine !== false; }
   async function currentUser() { return (await client.auth.getUser()).data.user; }
 
-  async function pull() {
+  async function pullOnce() {
     if (!client || !userId || !online()) return;
-    const pending = new Map((await ZX.Database.all('outbox')).map(x => [x.key, x]));
+    const knownConflicts = new Map((await ZX.Database.all('conflicts')).map(x => [x.key, x]));
     for (const entity of tables) {
       const { data, error } = await client.from(entity).select('*').eq('user_id', userId);
       if (error) throw error;
       for (const row of data || []) {
         const remote = decode(entity, row);
-        const localMutation = pending.get(remote.key);
-        if (localMutation && remote.version > localMutation.baseVersion && comparable(localMutation.data) === comparable(remote.data) && localMutation.operation === (remote.deletedAt ? 'delete' : 'upsert')) {
-          await ZX.Database.applyServerRecord(remote); await ZX.Database.remove('outbox', remote.key); pending.delete(remote.key);
+        const localMutation = await ZX.Database.get('outbox', remote.key);
+        if (localMutation && remote.version > localMutation.baseVersion && isEquivalentMutation(localMutation, remote)) {
+          await acceptEquivalent(localMutation, remote); knownConflicts.delete(remote.key);
         } else if (localMutation && remote.version > localMutation.baseVersion) {
           await ZX.Database.saveConflict({ key: remote.key, entity, id: remote.id, local: localMutation, cloud: remote });
-        } else if (!localMutation) await ZX.Database.applyServerRecord(remote);
+        } else if (!localMutation) {
+          const stale = knownConflicts.get(remote.key);
+          if (stale?.local?.entity === 'attachments') await ZX.Files.discardConflict({ ...stale, cloud: remote });
+          if (stale) await ZX.Database.remove('conflicts', remote.key);
+          await ZX.Database.applyServerRecord(remote);
+        }
       }
     }
     onState(await ZX.Database.state());
+  }
+  function pull() {
+    if (pullPromise) return pullPromise;
+    pullPromise = pullOnce().finally(() => { pullPromise = null; });
+    return pullPromise;
   }
 
   async function flush() {
@@ -76,9 +100,15 @@
           for (const item of ready) await ZX.Database.put('outbox', { ...item, attempts: (item.attempts || 0) + 1, lastError: error.message, lastAttemptAt: new Date().toISOString() });
           throw error;
         }
-        for (const item of data?.applied || []) await ZX.Database.markApplied(item.key, item.version, item.updated_at);
+        for (const item of data?.applied || []) await ZX.Database.markApplied(item.key, item.version, item.updated_at, ready.find(record => record.key === item.key));
         await ZX.Files.afterApplied(data?.applied || [], ready);
-        for (const conflict of data?.conflicts || []) await ZX.Database.saveConflict({ ...conflict, local: ready.find(x => x.key === conflict.key) });
+        const equivalent = [];
+        for (const conflict of data?.conflicts || []) {
+          const local = ready.find(x => x.key === conflict.key);
+          if (isEquivalentMutation(local, conflict.cloud)) { await acceptEquivalent(local, conflict.cloud); equivalent.push(local); }
+          else await ZX.Database.saveConflict({ ...conflict, local });
+        }
+        if (equivalent.length) await ZX.Files.afterApplied(equivalent.map(item => ({ key: item.key })), equivalent);
       }
       retryCount = 0; clearTimeout(sync.retryTimer);
       if (uploadErrors.length) onStatus('error', uploadErrors[0]); else onStatus('online');
