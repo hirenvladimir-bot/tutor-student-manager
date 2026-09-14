@@ -128,7 +128,7 @@
       if (changed) changes.push({ ...record, baseVersion: old?.version || 0, operation: record.deletedAt ? 'delete' : 'upsert' });
     });
     previous.forEach((old, key) => {
-      if (!current.has(key)) changes.push({ ...old, data: clone(old.data), baseVersion: old.version || 0, operation: 'delete', deletedAt: new Date().toISOString() });
+      if (!current.has(key) && !old.deletedAt) changes.push({ ...old, data: clone(old.data), baseVersion: old.version || 0, operation: 'delete', deletedAt: new Date().toISOString() });
     });
     return changes;
   }

@@ -112,10 +112,24 @@ test('an expired cached account is not presented as signed in', async ({ page })
   await expect(page.locator('#cloudSummary')).toHaveText('尚未登录同步账号');
 });
 
+test('a signed-in account must be logged out before another account can be entered', async ({ page }) => {
+  await page.evaluate(() => {
+    cloud = { ...cloud, userEmail: 'current@example.com', userId: 'current-user' };
+    sessionValidated = true;
+    openAuth();
+  });
+  await expect(page.locator('#cloudForm [name=email]')).toBeDisabled();
+  await expect(page.locator('#cloudForm [name=password]')).toBeDisabled();
+  await expect(page.locator('#authSubmitBtn')).toBeHidden();
+  await expect(page.locator('#authModeBtn')).toBeHidden();
+  await expect(page.locator('#logoutBtn')).toBeVisible();
+  await expect(page.locator('#authMessage')).toContainText('请先退出');
+});
+
 test('local interface becomes ready without waiting for cloud restoration', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true');
   const source = await page.locator('script[src*="app.js"]').getAttribute('src');
-  expect(source).toContain('v=55');
+  expect(source).toContain('v=57');
   const bootstrapSource = await page.evaluate(() => bootstrap.toString());
   expect(bootstrapSource).not.toContain('await restoreSession');
   expect(bootstrapSource).toContain('restoreSession().then');
@@ -144,16 +158,65 @@ test('cloud diagnostic button is wired and remains inside the data center', asyn
 test('data center identifies every queued record instead of showing only a count', async ({ page }) => {
   await page.evaluate(async () => {
     cloud.userEmail = 'queue@example.com';
-    await Zhixing.Database.put('outbox', { key: 'students:queued-a', entity: 'students', id: 'queued-a', data: { name: '待同步学生' }, baseVersion: 1, operation: 'upsert', attempts: 0 });
-    await Zhixing.Database.put('outbox', { key: 'custom_fields:queued-b', entity: 'custom_fields', id: 'queued-b', data: { key: '待同步信息', value: '内容' }, baseVersion: 1, operation: 'upsert', attempts: 1 });
+    await Zhixing.Database.put('outbox', { key: 'students:queued-a', entity: 'students', id: 'queued-a', data: { name: '待同步学生' }, baseVersion: 1, operation: 'upsert', attempts: 0, queuedAt: '2026-09-14T08:00:00.000Z' });
+    await Zhixing.Database.put('outbox', { key: 'custom_fields:queued-b', entity: 'custom_fields', id: 'queued-b', data: { key: '待同步信息', value: '内容' }, baseVersion: 1, operation: 'upsert', attempts: 1, lastAttemptAt: '2026-09-14T08:01:00.000Z' });
     openDataCenter();
     await renderSyncStatus();
     await renderUploadQueue();
   });
-  await expect(page.locator('#uploadQueue')).toContainText('2 条记录等待确认');
+  await expect(page.locator('#uploadQueue')).toContainText('2 条记录等待同步');
   await expect(page.locator('#uploadQueue')).toContainText('待同步学生');
   await expect(page.locator('#uploadQueue')).toContainText('待同步信息');
+  await expect(page.locator('#uploadQueue')).toContainText('学生资料 · 保存');
+  await expect(page.locator('#uploadQueue')).toContainText('自定义信息 · 保存');
+  await expect(page.locator('#uploadQueue')).toContainText('已尝试 1 次');
+  await expect(page.locator('#uploadQueue')).toContainText('加入 9/14');
   await expect(page.locator('#uploadQueue .cancel-upload')).toHaveCount(0);
+});
+
+test('queue errors use safe Chinese categories and stay inside a mobile data center', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(async () => {
+    cloud.userEmail = 'mobile@example.com';
+    await Zhixing.Database.put('outbox', { key: 'attachments:remote-only', entity: 'attachments', id: 'remote-only', data: { name: '云端附件.pdf', path: 'private/user/student/file.pdf' }, baseVersion: 1, operation: 'upsert', attempts: 2, lastError: 'POST url: https://secret@example.invalid/storage/v1/private/token-123/file.pdf' });
+    await Zhixing.Database.put('outbox', { key: 'attachments:local-file', entity: 'attachments', id: 'local-file', data: { name: '待上传.pdf', localBlobKey: 'blob:local-file' }, baseVersion: 0, operation: 'upsert', attempts: 0 });
+    openDataCenter();
+    await renderSyncStatus();
+  });
+  await expect(page.locator('#uploadQueue')).toContainText('同步遇到未知错误');
+  await expect(page.locator('#uploadQueue')).not.toContainText('example.invalid');
+  await expect(page.locator('#uploadQueue')).not.toContainText('secret@');
+  await expect(page.locator('#uploadQueue')).not.toContainText('token-123');
+  await expect(page.locator('#uploadQueue .cancel-upload')).toHaveCount(1);
+  await expect(page.locator('#uploadQueue .cancel-upload')).toHaveText('取消上传');
+  const overflow = await page.locator('#dataDialog').evaluate(dialog => dialog.scrollWidth > dialog.clientWidth);
+  expect(overflow).toBeFalsy();
+});
+
+test('global syncing keeps queued rows honest and categorizes backend errors', async ({ page }) => {
+  await page.evaluate(async () => {
+    cloud.userEmail = 'status@example.com';
+    liveSyncStatus = 'syncing';
+    const errors = [
+      ['login', '401 JWT session expired'],
+      ['network', 'Failed to fetch because connection timed out'],
+      ['permission', '403 row level security policy rejected'],
+      ['space', '413 payload too large: storage quota exceeded'],
+      ['limit', 'private raw server detail']
+    ];
+    for (const [id, lastError] of errors) await Zhixing.Database.put('outbox', { key: `students:${id}`, entity: 'students', id, data: { name: id }, baseVersion: 1, operation: 'upsert', attempts: id === 'limit' ? 6 : 1, lastError });
+    openDataCenter();
+    await renderUploadQueue();
+  });
+  await expect(page.locator('.upload-queue-head')).toContainText('同步进行中');
+  expect((await page.locator('.queue-state').allTextContents()).join(' ')).not.toContain('正在处理');
+  await expect(page.locator('#uploadQueue')).toContainText('登录状态已失效');
+  await expect(page.locator('#uploadQueue')).toContainText('网络连接异常');
+  await expect(page.locator('#uploadQueue')).toContainText('云端访问权限不足');
+  await expect(page.locator('#uploadQueue')).toContainText('云端存储空间或单文件限额不足');
+  await expect(page.locator('#uploadQueue')).toContainText('已达到自动重试上限');
+  await expect(page.locator('#uploadQueue')).not.toContainText('JWT');
+  await expect(page.locator('#uploadQueue')).not.toContainText('private raw server detail');
 });
 
 test('free-form scores save and progress records can be edited', async ({ page }) => {
@@ -207,7 +270,14 @@ test('lesson and focus notes support fast timestamped entries, editing and delet
   await expect(page.locator('#nextLessonList time')).toContainText(String(new Date().getFullYear()));
   await page.locator('#nextLessonList .edit-timed-note').click();
   await page.locator('#noteEditForm [name=text]').fill('二次函数图像与性质');
-  await page.locator('#noteEditForm [name=createdAt]').fill('2026-09-09T08:30');
+  // Playwright WebKit on Windows intermittently routes `fill()` for a
+  // datetime-local control to the preceding text input. Set the native value
+  // directly so this test exercises the application's submit path reliably.
+  await page.locator('#noteEditForm [name=createdAt]').evaluate((input, value) => {
+    input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, '2026-09-09T08:30');
   await page.locator('#noteEditForm button[value=default]').click();
   await expect(page.locator('#nextLessonList')).toContainText('二次函数图像与性质');
   await expect(page.locator('#nextLessonList')).toContainText('2026');
@@ -346,7 +416,8 @@ test('offline attachment is queued without losing preparation text', async ({ pa
   await page.locator('.cancel-upload').click();
   await expect(page.locator('#confirmDialog')).toHaveAttribute('open', '');
   await page.locator('#confirmAccept').click();
-  await expect(page.locator('#uploadQueue')).toBeHidden();
+  await expect(page.locator('#uploadQueue')).not.toContainText('讲义.pdf');
+  await expect(page.locator('#uploadQueue .cancel-upload')).toHaveCount(0);
   await expect(page.locator('#prepList')).not.toContainText('讲义.pdf');
   expect(await page.evaluate(() => Zhixing.Database.all('blobs').then(items => items.length))).toBe(0);
 });
@@ -647,7 +718,8 @@ test('failed record synchronization is visible and cannot report a false success
   });
   await expect(page.locator('#uploadQueue')).toContainText('1 条记录同步失败');
   await expect(page.locator('#uploadQueue')).toContainText('失败的学生记录');
-  await expect(page.locator('#uploadQueue')).toContainText('版本接口拒绝');
+  await expect(page.locator('#uploadQueue')).toContainText('已达到自动重试上限');
+  await expect(page.locator('#uploadQueue')).not.toContainText('版本接口拒绝');
   await page.locator('#pushBtn').click();
   await expect(page.locator('#dataMessage')).toContainText('同步未完成：1 个项目同步失败');
   await expect(page.locator('#dataMessage')).not.toContainText('本机更改已同步');

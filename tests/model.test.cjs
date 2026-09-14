@@ -88,6 +88,18 @@ test('diff isolates record edits and creates tombstones for deletions', () => {
   assert.equal(deletes.find(x => x.entity === 'scores').operation, 'delete');
 });
 
+test('a server tombstone is not queued as a new delete after hydration', () => {
+  const deleted = {
+    key: 'custom_fields:deleted-field', entity: 'custom_fields', id: 'deleted-field', studentId: 'student-a',
+    data: { key: '旧信息', value: '已删除' }, version: 4, deletedAt: '2026-09-14T08:00:00.000Z'
+  };
+  const previous = new Map([[deleted.key, deleted]]);
+  const hydrated = Model.hydrate(previous, null);
+  const current = Model.flatten(hydrated);
+
+  assert.equal(Model.diff(previous, current).length, 0);
+});
+
 test('hydrate associates large attachment sets without repeatedly scanning owner lists', () => {
   const studentId = '11111111-1111-4111-8111-111111111111';
   const records = new Map();

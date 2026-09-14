@@ -19,12 +19,18 @@ function mockCloud(userId) {
   const now = () => new Date().toISOString();
   const record = (entity, row) => ({
     key: `${entity}:${row.id}`, entity, id: row.id, studentId: row.student_id || null,
-    data: entity === 'students' ? { name: row.name, school: row.school, targetSchool: row.target_school, currentScore: row.current_score, targetScore: row.target_score, nextLesson: row.next_lesson, focusContent: row.focus_content } : entity === 'attachments' ? { ownerType: row.owner_type, ownerId: row.owner_id, name: row.name, relativePath: row.relative_path || '', type: row.mime_type || 'application/octet-stream', size: Number(row.size || 0), path: row.storage_path || '', data: row.legacy_data || '', pending: false, localBlobKey: '' } : {},
+    data: entity === 'students' ? { name: row.name, school: row.school, targetSchool: row.target_school, currentScore: row.current_score, targetScore: row.target_score, nextLesson: row.next_lesson, focusContent: row.focus_content }
+      : entity === 'scores' ? { label: row.label || '', date: row.exam_date || '', score: Number(row.score) }
+      : entity === 'custom_fields' ? { key: row.field_key || '', value: row.field_value || '' }
+      : entity === 'attachments' ? { ownerType: row.owner_type, ownerId: row.owner_id, name: row.name, relativePath: row.relative_path || '', type: row.mime_type || 'application/octet-stream', size: Number(row.size || 0), path: row.storage_path || '', data: row.legacy_data || '', pending: false, localBlobKey: '' }
+      : {},
     version: row.version, deletedAt: row.deleted_at, updatedAt: row.updated_at
   });
   function studentRow(mutation, version) {
     const d = mutation.data;
     if (mutation.entity === 'attachments') return { id: mutation.id, user_id: userId, student_id: mutation.student_id, owner_type: d.ownerType, owner_id: d.ownerId, name: d.name || '', relative_path: d.relativePath || '', mime_type: d.type || 'application/octet-stream', size: Number(d.size || 0), storage_path: d.path || '', legacy_data: d.data || '', version, deleted_at: mutation.operation === 'delete' ? now() : null, updated_at: now() };
+    if (mutation.entity === 'scores') return { id: mutation.id, user_id: userId, student_id: mutation.student_id, label: d.label || '', exam_date: d.date || '', score: Number(d.score || 0), version, deleted_at: mutation.operation === 'delete' ? now() : null, updated_at: now() };
+    if (mutation.entity === 'custom_fields') return { id: mutation.id, user_id: userId, student_id: mutation.student_id, field_key: d.key || '', field_value: d.value || '', version, deleted_at: mutation.operation === 'delete' ? now() : null, updated_at: now() };
     return { id: mutation.id, user_id: userId, name: d.name || '', school: d.school || '', target_school: d.targetSchool || '', current_score: d.currentScore ?? null, target_score: d.targetScore ?? null, next_lesson: d.nextLesson || '', focus_content: d.focusContent || '', version, deleted_at: mutation.operation === 'delete' ? now() : null, updated_at: now() };
   }
   const client = {
@@ -189,6 +195,47 @@ test('legacy attachment metadata aliases converge and do not delete Storage obje
   assert.equal((await ZX.Database.all('cleanup')).length, 0, 'legacy convergence must never schedule an unverified Storage deletion');
 });
 
+test('a historical attachment plus custom-field and score tombstones converge once and stay at zero', async () => {
+  const ZX = loadDevice(), userId = 'c0c0c0c0-c0c0-40c0-80c0-c0c0c0c0c0c0', cloud = mockCloud(userId);
+  await startDevice(ZX, cloud.client, { students: [], activeId: null });
+  const studentId = 'c1c1c1c1-c1c1-41c1-81c1-c1c1c1c1c1c1';
+  const attachmentId = 'c2c2c2c2-c2c2-42c2-82c2-c2c2c2c2c2c2';
+  const ownerId = 'c3c3c3c3-c3c3-43c3-83c3-c3c3c3c3c3c3';
+  const customIds = ['c4c4c4c4-c4c4-44c4-84c4-c4c4c4c4c4c4', 'c5c5c5c5-c5c5-45c5-85c5-c5c5c5c5c5c5'];
+  const scoreId = 'c6c6c6c6-c6c6-46c6-86c6-c6c6c6c6c6c6';
+  const updatedAt = new Date().toISOString();
+  const attachmentKey = `attachments:${attachmentId}`;
+  cloud.rows.set(attachmentKey, { id: attachmentId, user_id: userId, student_id: studentId, owner_type: 'preparations', owner_id: ownerId, name: '历史讲义.pdf', relative_path: '', mime_type: 'application/pdf', size: 512, storage_path: `${userId}/${studentId}/历史讲义.pdf`, legacy_data: '', version: 2, deleted_at: null, updated_at: updatedAt });
+  const attachmentLocal = { key: attachmentKey, entity: 'attachments', id: attachmentId, studentId, data: { ownerType: 'prep', ownerId, name: '历史讲义.pdf', relativePath: '历史讲义.pdf', type: '', size: '', path: '', data: '', pending: false, localBlobKey: '' }, version: 1, baseVersion: 1, operation: 'upsert', attempts: 0 };
+  await ZX.Database.put('outbox', attachmentLocal);
+  await ZX.Database.saveConflict({ key: attachmentKey, entity: 'attachments', id: attachmentId, local: attachmentLocal, cloud: { key: attachmentKey, entity: 'attachments', id: attachmentId, studentId, data: {}, version: 2 } });
+
+  for (const [index, id] of customIds.entries()) {
+    const key = `custom_fields:${id}`, data = { key: `旧信息${index + 1}`, value: '已删除' };
+    cloud.rows.set(key, { id, user_id: userId, student_id: studentId, field_key: data.key, field_value: data.value, version: 2, deleted_at: updatedAt, updated_at: updatedAt });
+    const local = { key, entity: 'custom_fields', id, studentId, data, version: 1, baseVersion: 1, operation: 'delete', deletedAt: updatedAt, attempts: 0 };
+    await ZX.Database.put('outbox', local);
+    await ZX.Database.saveConflict({ key, entity: 'custom_fields', id, local, cloud: { key, entity: 'custom_fields', id, studentId, data, version: 2, deletedAt: updatedAt } });
+  }
+  const scoreKey = `scores:${scoreId}`, scoreData = { label: '旧考试', date: '2026-09-01', score: 76 };
+  cloud.rows.set(scoreKey, { id: scoreId, user_id: userId, student_id: studentId, label: scoreData.label, exam_date: scoreData.date, score: scoreData.score, version: 2, deleted_at: updatedAt, updated_at: updatedAt });
+  const scoreLocal = { key: scoreKey, entity: 'scores', id: scoreId, studentId, data: scoreData, version: 1, baseVersion: 1, operation: 'delete', deletedAt: updatedAt, attempts: 0 };
+  await ZX.Database.put('outbox', scoreLocal);
+  await ZX.Database.saveConflict({ key: scoreKey, entity: 'scores', id: scoreId, local: scoreLocal, cloud: { key: scoreKey, entity: 'scores', id: scoreId, studentId, data: scoreData, version: 2, deletedAt: updatedAt } });
+
+  let mutationCalls = 0;
+  const originalRpc = cloud.client.rpc;
+  cloud.client.rpc = async (name, args) => { if (name === 'apply_tutor_mutations') mutationCalls++; return originalRpc(name, args); };
+
+  for (let pass = 0; pass < 5; pass++) {
+    assert.equal(await ZX.Sync.sync(), true, `sync pass ${pass + 1} should remain complete`);
+    assert.equal((await ZX.Database.all('outbox')).length, 0, `outbox must stay empty after pass ${pass + 1}`);
+    assert.equal((await ZX.Database.all('conflicts')).length, 0, `conflicts must stay empty after pass ${pass + 1}`);
+  }
+  assert.equal(mutationCalls, 0, 'historical equivalent records must not be resubmitted after convergence');
+  assert.equal((await ZX.Database.all('cleanup')).length, 0, 'convergence must not schedule Storage deletion');
+});
+
 test('attachment conflicts with two different cloud paths remain for manual review', async () => {
   const ZX = loadDevice(), userId = 'cbcbcbcb-cbcb-4bcb-8bcb-cbcbcbcbcbcb', cloud = mockCloud(userId);
   await startDevice(ZX, cloud.client, { students: [], activeId: null });
@@ -257,9 +304,37 @@ test('one failed attachment does not block other records or increment their retr
 
   await ZX.Sync.flush();
   ZX.Files.beforeSync = originalBeforeSync;
-  assert.ok(cloud.rows.has(`students:${studentId}`));
+  assert.ok(cloud.rows.has(`students:${studentId}`), `cloud keys: ${[...cloud.rows.keys()].join(', ')}`);
   assert.equal(await ZX.Database.get('outbox', `students:${studentId}`), undefined);
   assert.equal((await ZX.Database.get('outbox', `attachments:${attachmentId}`)).attempts, 1);
+});
+
+test('a suspended TUS upload does not block ordinary records in the same batch', async () => {
+  const ZX = loadDevice();
+  const cloud = mockCloud('c1c1c1c1-c1c1-41c1-81c1-c1c1c1c1c1c1');
+  await startDevice(ZX, cloud.client, { students: [], activeId: null });
+  const studentId = '71717171-7171-4171-8171-717171717171';
+  const attachmentId = '72727272-7272-4272-8272-727272727272';
+  await ZX.Database.put('outbox', { key: `students:${studentId}`, entity: 'students', id: studentId, studentId: null, data: { name: '不应等待上传' }, version: 0, baseVersion: 0, operation: 'upsert', attempts: 0 });
+  await ZX.Database.put('outbox', { key: `attachments:${attachmentId}`, entity: 'attachments', id: attachmentId, studentId, data: { name: '悬挂.pdf', path: '', localBlobKey: 'blob:suspended' }, version: 0, baseVersion: 0, operation: 'upsert', attempts: 0 });
+  const originalBeforeSync = ZX.Files.beforeSync;
+  ZX.Files.beforeSync = item => item.entity === 'attachments' ? new Promise(() => {}) : originalBeforeSync(item);
+  let ordinaryApplied;
+  const applied = new Promise(resolve => { ordinaryApplied = resolve; });
+  const originalRpc = cloud.client.rpc;
+  let observedPayload, observedResult;
+  cloud.client.rpc = async (name, args) => {
+    const result = await originalRpc(name, args);
+    if (name === 'apply_tutor_mutations' && args.p_mutations.some(item => item.entity === 'students')) { observedPayload = args.p_mutations; observedResult = result; ordinaryApplied(); }
+    return result;
+  };
+
+  void ZX.Sync.flush();
+  await applied;
+  for (let index = 0; index < 20 && await ZX.Database.get('outbox', `students:${studentId}`); index++) await new Promise(resolve => setImmediate(resolve));
+  assert.ok(cloud.rows.has(`students:${studentId}`), `payload=${JSON.stringify(observedPayload)} result=${JSON.stringify(observedResult)} keys=${[...cloud.rows.keys()].join(', ')}`);
+  assert.equal(await ZX.Database.get('outbox', `students:${studentId}`), undefined);
+  assert.ok(await ZX.Database.get('outbox', `attachments:${attachmentId}`));
 });
 
 test('sync processes a bounded batch instead of flooding the network', async () => {
@@ -273,6 +348,173 @@ test('sync processes a bounded batch instead of flooding the network', async () 
   await ZX.Sync.flush();
   assert.equal(cloud.rows.size, 20);
   assert.equal((await ZX.Database.all('outbox')).length, 5);
+});
+
+test('full sync drains every fresh bounded batch before reporting completion', async () => {
+  const ZX = loadDevice();
+  const cloud = mockCloud('d1d1d1d1-d1d1-41d1-81d1-d1d1d1d1d1d1');
+  await startDevice(ZX, cloud.client, { students: [], activeId: null });
+  for (let index = 0; index < 45; index++) {
+    const id = `81000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+    await ZX.Database.put('outbox', { key: `students:${id}`, entity: 'students', id, studentId: null, data: { name: `排空学生${index}` }, version: 0, baseVersion: 0, operation: 'upsert', attempts: 0 });
+  }
+
+  assert.equal(await ZX.Sync.sync(), true);
+  assert.equal(cloud.rows.size, 45);
+  assert.equal((await ZX.Database.all('outbox')).length, 0);
+});
+
+test('an edit made while an RPC is in flight is rebased and synchronized instead of being dropped', async () => {
+  const ZX = loadDevice();
+  const userId = 'd2d2d2d2-d2d2-42d2-82d2-d2d2d2d2d2d2';
+  const studentId = '82828282-8282-4282-8282-828282828282';
+  const cloud = mockCloud(userId);
+  await startDevice(ZX, cloud.client, { activeId: studentId, students: [{ id: studentId, name: '在途编辑', school: '', targetSchool: '', scores: [], custom: [], preparations: [], courseProgress: [] }] });
+  let state = await ZX.Database.state();
+  state.students[0].school = '第一项修改';
+  await ZX.Database.persist(state);
+
+  const originalRpc = cloud.client.rpc;
+  let releaseRpc, rpcStarted;
+  const waiting = new Promise(resolve => { releaseRpc = resolve; });
+  const started = new Promise(resolve => { rpcStarted = resolve; });
+  let mutationCalls = 0;
+  cloud.client.rpc = async (name, args) => {
+    if (name !== 'apply_tutor_mutations') return originalRpc(name, args);
+    mutationCalls++;
+    if (mutationCalls === 1) { rpcStarted(); await waiting; }
+    return originalRpc(name, args);
+  };
+
+  const syncing = ZX.Sync.sync();
+  await started;
+  state = await ZX.Database.state();
+  state.students[0].targetSchool = '第二项修改';
+  await ZX.Database.persist(state);
+  ZX.Sync.schedule();
+  releaseRpc();
+  assert.equal(await syncing, true);
+
+  const row = cloud.rows.get(`students:${studentId}`);
+  assert.equal(row.school, '第一项修改');
+  assert.equal(row.target_school, '第二项修改');
+  assert.equal(row.version, 3);
+  assert.equal(mutationCalls, 2);
+  assert.equal((await ZX.Database.all('outbox')).length, 0);
+});
+
+test('overlapping sync calls share one run and do not submit a mutation twice', async () => {
+  const ZX = loadDevice();
+  const cloud = mockCloud('d3d3d3d3-d3d3-43d3-83d3-d3d3d3d3d3d3');
+  await startDevice(ZX, cloud.client, { students: [], activeId: null });
+  const id = '83838383-8383-4383-8383-838383838383';
+  await ZX.Database.put('outbox', { key: `students:${id}`, entity: 'students', id, studentId: null, data: { name: '单飞' }, version: 0, baseVersion: 0, operation: 'upsert', attempts: 0 });
+  const originalRpc = cloud.client.rpc;
+  let calls = 0;
+  cloud.client.rpc = async (name, args) => { if (name === 'apply_tutor_mutations') calls++; return originalRpc(name, args); };
+
+  const [first, second, third] = await Promise.all([ZX.Sync.sync(), ZX.Sync.sync(), ZX.Sync.sync()]);
+  assert.equal(first, true);
+  assert.equal(second, true);
+  assert.equal(third, true);
+  assert.equal(calls, 1);
+  assert.equal((await ZX.Database.all('outbox')).length, 0);
+});
+
+test('logout and account switch ignore an old in-flight RPC and do not reuse its promise', async () => {
+  const ZX = loadDevice();
+  const cloudA = mockCloud('a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1');
+  const cloudB = mockCloud('b1b1b1b1-b1b1-41b1-81b1-b1b1b1b1b1b1');
+  await startDevice(ZX, cloudA.client, { students: [], activeId: null });
+  const oldId = '91919191-9191-4191-8191-919191919191';
+  await ZX.Database.put('outbox', { key: `students:${oldId}`, entity: 'students', id: oldId, studentId: null, data: { name: '旧账号响应' }, operation: 'upsert', baseVersion: 0, attempts: 0 });
+  const originalRpc = cloudA.client.rpc;
+  let release, announce;
+  const waiting = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { announce = resolve; });
+  cloudA.client.rpc = async (name, args) => {
+    if (name === 'apply_tutor_mutations') { announce(); await waiting; }
+    return originalRpc(name, args);
+  };
+
+  const oldSync = ZX.Sync.sync();
+  await started;
+  await ZX.Sync.stop();
+  await ZX.Database.wipe();
+  const newStart = ZX.Sync.start({ client: cloudB.client, onState() {}, onStatus() {} });
+  assert.equal(await newStart, true, 'new account startup must not await the old account promise');
+  release();
+  assert.equal(await oldSync, false);
+  assert.equal(await ZX.Database.get('records', `students:${oldId}`), undefined);
+  assert.equal((await ZX.Database.all('outbox')).length, 0);
+  assert.equal(cloudB.rows.has(`students:${oldId}`), false);
+});
+
+test('logout prevents an old pull response from writing into a new local session', async () => {
+  const ZX = loadDevice();
+  const userA = 'a2a2a2a2-a2a2-42a2-82a2-a2a2a2a2a2a2';
+  const cloudA = mockCloud(userA), cloudB = mockCloud('b2b2b2b2-b2b2-42b2-82b2-b2b2b2b2b2b2');
+  await startDevice(ZX, cloudA.client, { students: [], activeId: null });
+  const staleId = '92929292-9292-4292-8292-929292929292';
+  cloudA.rows.set(`students:${staleId}`, { id: staleId, user_id: userA, name: '迟到的旧账号数据', school: '', target_school: '', current_score: null, target_score: null, next_lesson: '', focus_content: '', version: 1, deleted_at: null, updated_at: new Date().toISOString() });
+  const originalFrom = cloudA.client.from;
+  let release, announce;
+  const waiting = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { announce = resolve; });
+  cloudA.client.from = table => table === 'students' ? { select: () => ({ eq: async () => { announce(); await waiting; return originalFrom(table).select().eq('user_id', userA); } }) } : originalFrom(table);
+
+  const oldPull = ZX.Sync.pull();
+  await started;
+  await ZX.Sync.stop();
+  await ZX.Database.wipe();
+  assert.equal(await ZX.Sync.start({ client: cloudB.client, onState() {}, onStatus() {} }), true);
+  release();
+  assert.equal(await oldPull, false);
+  assert.equal(await ZX.Database.get('records', `students:${staleId}`), undefined);
+});
+
+test('stop waits for an already-started local commit before logout can safely wipe storage', async () => {
+  const ZX = loadDevice();
+  const cloud = mockCloud('a3a3a3a3-a3a3-43a3-83a3-a3a3a3a3a3a3');
+  await startDevice(ZX, cloud.client, { students: [], activeId: null });
+  const id = '93939393-9393-4393-8393-939393939393';
+  await ZX.Database.put('outbox', { key: `students:${id}`, entity: 'students', id, studentId: null, data: { name: '事务收尾' }, operation: 'upsert', baseVersion: 0, attempts: 0 });
+  const originalMarkApplied = ZX.Database.markApplied;
+  let release, announce;
+  const waiting = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { announce = resolve; });
+  ZX.Database.markApplied = async (...args) => { announce(); await waiting; return originalMarkApplied(...args); };
+
+  const syncing = ZX.Sync.sync();
+  await started;
+  let stopped = false;
+  const stopping = ZX.Sync.stop().then(() => { stopped = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(stopped, false, 'stop must wait for the local transaction already admitted by the old session');
+  release();
+  await stopping;
+  await ZX.Database.wipe();
+  await syncing;
+  assert.equal(await ZX.Database.get('records', `students:${id}`), undefined);
+  assert.equal((await ZX.Database.all('outbox')).length, 0);
+});
+
+test('direct account switch refuses to submit an outbox owned by the previous user', async () => {
+  const ZX = loadDevice();
+  const cloudA = mockCloud('a4a4a4a4-a4a4-44a4-84a4-a4a4a4a4a4a4');
+  const cloudB = mockCloud('b4b4b4b4-b4b4-44b4-84b4-b4b4b4b4b4b4');
+  await startDevice(ZX, cloudA.client, { students: [], activeId: null });
+  const id = '94949494-9494-4494-8494-949494949494';
+  const key = `students:${id}`;
+  await ZX.Database.put('outbox', { key, entity: 'students', id, studentId: null, data: { name: '仅属于账号A' }, operation: 'upsert', baseVersion: 0, attempts: 0 });
+  let bMutationCalls = 0;
+  const originalRpc = cloudB.client.rpc;
+  cloudB.client.rpc = async (name, args) => { if (name === 'apply_tutor_mutations') bMutationCalls++; return originalRpc(name, args); };
+
+  assert.equal(await ZX.Sync.start({ client: cloudB.client, onState() {}, onStatus() {} }), false);
+  assert.equal(bMutationCalls, 0);
+  assert.equal(cloudB.rows.size, 0);
+  assert.ok(await ZX.Database.get('outbox', key), 'old unsynced work is preserved for an explicit logout/reset decision');
 });
 
 test('legacy compatibility snapshot failures make the sync visibly fail', async () => {

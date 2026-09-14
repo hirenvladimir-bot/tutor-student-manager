@@ -4,6 +4,9 @@
   let client, bucket, endpoint, onStatus = () => {};
   const activeUploads = new Map();
   const uploadedThisRun = new Set();
+  const CLEANUP_MAX_ATTEMPTS = 6;
+  const CLEANUP_BASE_DELAY = 5000;
+  let cleanupTimer;
   const uuid = () => crypto.randomUUID();
   const safeName = name => `file.${(name.match(/\.([a-z0-9]{1,12})$/i)?.[1] || 'bin').toLowerCase()}`;
   const report = (message, detail) => onStatus(message, detail);
@@ -26,8 +29,10 @@
     });
   }
   async function cancel(key) { const active = activeUploads.get(key); if (!active) return false; await active.cancel(); return true; }
+  async function cancelActive() { await Promise.allSettled([...activeUploads.values()].map(active => active.cancel())); }
   async function clearLocal() {
-    await Promise.all([...activeUploads.values()].map(active => active.cancel().catch(() => {})));
+    clearTimeout(cleanupTimer);
+    await cancelActive();
     if (root.localStorage) for (let index = root.localStorage.length - 1; index >= 0; index--) { const key = root.localStorage.key(index); if (key?.startsWith('tus::')) root.localStorage.removeItem(key); }
   }
   async function diagnose() {
@@ -70,17 +75,44 @@
     const existing = await ZX.Database.get('cleanup', path);
     await ZX.Database.put('cleanup', existing || { key: path, path, attempts: 0, queuedAt: new Date().toISOString() });
   }
-  async function processCleanup() {
-    if (!client || root.navigator?.onLine === false) return;
+  async function processCleanup(context = {}) {
+    const service = context.client || client;
+    const active = context.isActive || (() => true);
+    if (!service || !active() || root.navigator?.onLine === false) return;
+    clearTimeout(cleanupTimer);
     const queued = await ZX.Database.all('cleanup');
+    const now = Date.now();
     for (const item of queued) {
+      if (!active()) return;
+      if ((item.attempts || 0) >= CLEANUP_MAX_ATTEMPTS) continue;
+      const dueAt = item.nextAttemptAt ? Date.parse(item.nextAttemptAt) : 0;
+      if (dueAt > now) continue;
       try {
-        const { error } = await client.storage.from(bucket).remove([item.path]);
+        // A delete may have been superseded by a new attachment mutation that
+        // still references the same object. Never remove a live path.
+        const records = await ZX.Database.all('records');
+        const outbox = await ZX.Database.all('outbox');
+        const referenced = records.some(record => record.entity === 'attachments' && !record.deletedAt && record.data?.path === item.path)
+          || outbox.some(record => record.entity === 'attachments' && record.operation !== 'delete' && record.data?.path === item.path);
+        if (referenced) { await ZX.Database.remove('cleanup', item.key); continue; }
+        if (!active()) return;
+        const { error } = await service.storage.from(bucket).remove([item.path]);
+        if (!active()) return;
         if (error && !/not found/i.test(error.message || '')) throw error;
         await ZX.Database.remove('cleanup', item.key);
       } catch (error) {
-        await ZX.Database.put('cleanup', { ...item, attempts: (item.attempts || 0) + 1, lastError: error.message || String(error), lastAttemptAt: new Date().toISOString() });
+        if (!active()) return;
+        const attempts = (item.attempts || 0) + 1;
+        const delay = Math.min(5 * 60 * 1000, CLEANUP_BASE_DELAY * (2 ** Math.min(attempts - 1, 6)));
+        await ZX.Database.put('cleanup', { ...item, attempts, lastError: error.message || String(error), lastAttemptAt: new Date().toISOString(), nextAttemptAt: new Date(Date.now() + delay).toISOString() });
       }
+    }
+    if (!active()) return;
+    const remaining = (await ZX.Database.all('cleanup')).filter(item => (item.attempts || 0) < CLEANUP_MAX_ATTEMPTS && item.nextAttemptAt);
+    if (remaining.length) {
+      const delay = Math.max(250, Math.min(...remaining.map(item => Math.max(0, Date.parse(item.nextAttemptAt) - Date.now()))));
+      cleanupTimer = setTimeout(() => { if (active()) processCleanup(context); }, delay);
+      if (cleanupTimer?.unref) cleanupTimer.unref();
     }
   }
   async function prepare(files, section, recordId, studentId, status = () => {}) {
@@ -98,7 +130,10 @@
     }
     return result;
   }
-  async function beforeSync(mutation) {
+  async function beforeSync(mutation, context = {}) {
+    const service = context.client || client;
+    const active = context.isActive || (() => true);
+    if (!active()) { const error = new Error('同步会话已结束'); error.code = 'SESSION_CANCELLED'; throw error; }
     if (mutation.entity !== 'attachments') return mutation;
     if (mutation.operation === 'delete') {
       if (mutation.data.localBlobKey) await ZX.Database.remove('blobs', mutation.data.localBlobKey);
@@ -106,6 +141,7 @@
     }
     if (mutation.data.path) {
       if (mutation.data.localBlobKey) await ZX.Database.remove('blobs', mutation.data.localBlobKey).catch(() => {});
+      if (!active()) { const error = new Error('同步会话已结束'); error.code = 'SESSION_CANCELLED'; throw error; }
       const data = { ...mutation.data };
       delete data.localBlobKey;
       delete data.uploadPath;
@@ -120,8 +156,10 @@
       try {
         const cached = await ZX.Database.get('blobs', mutation.data.localBlobKey);
         if (!cached?.blob && !cached?.buffer && !cached?.dataUrl) throw new Error(`找不到待上传文件：${mutation.data.name}`);
-        const session = (await client.auth.getSession()).data.session;
-        const user = (await client.auth.getUser()).data.user;
+        const session = (await service.auth.getSession()).data.session;
+        if (!active()) { const error = new Error('同步会话已结束'); error.code = 'SESSION_CANCELLED'; throw error; }
+        const user = (await service.auth.getUser()).data.user;
+        if (!active()) { const error = new Error('同步会话已结束'); error.code = 'SESSION_CANCELLED'; throw error; }
         if (!session || !user) {
           const error = new Error('需要登录后才能继续上传文件');
           error.code = 'AUTH_REQUIRED';
@@ -132,11 +170,13 @@
         if (!mutation.data.uploadPath) {
           mutation = { ...mutation, data: { ...mutation.data, uploadPath: path } };
           await ZX.Database.applyServerRecord({ ...mutation, version: mutation.baseVersion, deletedAt: null });
+          if (!active()) { const error = new Error('同步会话已结束'); error.code = 'SESSION_CANCELLED'; throw error; }
           await ZX.Database.put('outbox', mutation);
         }
         const source = cached.blob || (cached.buffer ? new Blob([cached.buffer], { type: cached.type || mutation.data.type }) : await (await fetch(cached.dataUrl)).blob());
         report(`正在上传 ${mutation.data.name}（0%）`, { ...detail, state: 'uploading' });
         await upload(source, path, session.access_token, percent => report(`正在上传 ${mutation.data.name}（${percent}%）`, { ...detail, state: 'uploading', percent }), mutation.key);
+        if (!active()) { const error = new Error('同步会话已结束'); error.code = 'SESSION_CANCELLED'; throw error; }
         mutation = { ...mutation, data: { ...mutation.data, path, pending: false } };
         delete mutation.data.localBlobKey;
         delete mutation.data.uploadPath;
@@ -153,22 +193,34 @@
     }
     return mutation;
   }
-  async function afterApplied(applied, queued) {
+  async function afterApplied(applied, queued, context = {}) {
+    const active = context.isActive || (() => true);
+    if (!active()) return;
     const keys = new Set((applied || []).map(item => item.key));
     for (const mutation of queued || []) {
       if (keys.has(mutation.key) && mutation.entity === 'attachments' && mutation.operation !== 'delete' && uploadedThisRun.has(mutation.key)) {
         uploadedThisRun.delete(mutation.key);
         report(`${mutation.data.name} 已完成云端同步`, { key: mutation.key, id: mutation.id, name: mutation.data.name, state: 'complete', percent: 100 });
       }
-      if (keys.has(mutation.key) && mutation.entity === 'attachments' && mutation.operation === 'delete') await queueCleanup(mutation.data.path);
+      if (keys.has(mutation.key) && mutation.entity === 'attachments' && mutation.operation === 'delete') {
+        const latest = await ZX.Database.get('outbox', mutation.key);
+        const record = await ZX.Database.get('records', mutation.key);
+        if (!active()) return;
+        const stillReferenced = (latest?.operation !== 'delete' && latest?.data?.path === mutation.data.path)
+          || (!record?.deletedAt && record?.data?.path === mutation.data.path);
+        if (!stillReferenced) await queueCleanup(mutation.data.path);
+      }
     }
-    await processCleanup();
+    await processCleanup(context);
   }
-  async function discardConflict(conflict, options = {}) {
+  async function discardConflict(conflict, options = {}, context = {}) {
+    const active = context.isActive || (() => true);
+    if (!active()) return;
     const local = conflict?.local;
     if (local?.entity !== 'attachments') return;
     if (local.data?.localBlobKey) await ZX.Database.remove('blobs', local.data.localBlobKey);
+    if (!active()) return;
     if (!options.preserveStorage && local.data?.path && local.data.path !== conflict.cloud?.data?.path) await queueCleanup(local.data.path);
   }
-  ZX.Files = { configure, prepare, beforeSync, afterApplied, queueCleanup, processCleanup, discardConflict, cancel, clearLocal, diagnose };
+  ZX.Files = { configure, prepare, beforeSync, afterApplied, queueCleanup, processCleanup, discardConflict, cancel, cancelActive, clearLocal, diagnose };
 })(window);

@@ -71,3 +71,27 @@ test('failed data records can be returned to the synchronization queue', async (
   assert.equal(retried.attempts, 0);
   assert.equal(retried.lastError, '');
 });
+
+test('markApplied treats a missing outbox mutation as cancelled and never resurrects it', async () => {
+  await ZX.Database.wipe();
+  const id = '77777777-7777-4777-8777-777777777777';
+  const key = `students:${id}`;
+  const sent = { key, entity: 'students', id, studentId: null, data: { name: '已取消' }, operation: 'upsert', baseVersion: 0 };
+
+  assert.equal(await ZX.Database.markApplied(key, 1, new Date().toISOString(), sent), 'cancelled');
+  assert.equal(await ZX.Database.get('records', key), undefined);
+  assert.equal(await ZX.Database.get('outbox', key), undefined);
+});
+
+test('persist atomically rolls back records, outbox and meta when any write cannot be cloned', async () => {
+  await ZX.Database.wipe();
+  const id = '88888888-8888-4888-8888-888888888888';
+  const state = await ZX.Database.start({ activeId: id, students: [{ id, name: '原值', school: '', scores: [], custom: [], preparations: [], courseProgress: [] }] });
+  state.students[0].school = '不应部分保存';
+  state.activeId = Symbol('uncloneable');
+
+  await assert.rejects(ZX.Database.persist(state));
+  assert.equal((await ZX.Database.get('records', `students:${id}`)).data.school, '');
+  assert.equal(await ZX.Database.get('outbox', `students:${id}`), undefined);
+  assert.equal((await ZX.Database.get('meta', 'state')).activeId, id);
+});

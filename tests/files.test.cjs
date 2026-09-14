@@ -59,10 +59,62 @@ test('cloud attachment is removed only after its tombstone is accepted', async (
   assert.equal(cleanup.length, 1);
   assert.equal(cleanup[0].attempts, 1);
 
+  await ZX.Database.put('cleanup', { ...cleanup[0], nextAttemptAt: new Date(Date.now() - 1000).toISOString() });
   await ZX.Files.processCleanup();
   cleanup = await ZX.Database.all('cleanup');
   assert.equal(removeCalls, 2);
   assert.equal(cleanup.length, 0);
+});
+
+test('an in-flight attachment delete superseded by a live upsert never cleans the referenced path', async () => {
+  const ZX = load();
+  await ZX.Database.wipe();
+  const id = '24242424-2424-4242-8242-242424242424', key = `attachments:${id}`, path = 'user/student/live.pdf';
+  const deletion = { key, entity: 'attachments', id, studentId: 'student', data: { name: 'live.pdf', path }, operation: 'delete', deletedAt: new Date().toISOString() };
+  const replacement = { ...deletion, operation: 'upsert', deletedAt: null, data: { ...deletion.data, pending: false } };
+  await ZX.Database.put('records', replacement);
+  await ZX.Database.put('outbox', replacement);
+  let removeCalls = 0;
+  ZX.Files.configure({ bucket: 'tutor-files', endpoint: 'unused', client: { storage: { from: () => ({ remove: async () => { removeCalls++; return { error: null }; } }) } } });
+
+  await ZX.Files.afterApplied([{ key }], [deletion]);
+  assert.equal(removeCalls, 0);
+  assert.equal((await ZX.Database.all('cleanup')).length, 0);
+});
+
+test('cleanup uses exponential backoff, respects its retry cap, and skips live paths', async () => {
+  const ZX = load();
+  await ZX.Database.wipe();
+  let removeCalls = 0;
+  ZX.Files.configure({
+    bucket: 'tutor-files', endpoint: 'unused',
+    client: { storage: { from: () => ({ remove: async () => { removeCalls++; return { error: new Error('temporary') }; } }) } }
+  });
+  await ZX.Files.queueCleanup('user/orphan.pdf');
+  await ZX.Files.processCleanup();
+  let item = await ZX.Database.get('cleanup', 'user/orphan.pdf');
+  assert.equal(item.attempts, 1);
+  assert.ok(Date.parse(item.nextAttemptAt) > Date.now());
+  await ZX.Files.processCleanup();
+  assert.equal(removeCalls, 1, 'a cleanup item must not retry before its backoff expires');
+
+  for (let attempt = 1; attempt < 6; attempt++) {
+    item = await ZX.Database.get('cleanup', 'user/orphan.pdf');
+    await ZX.Database.put('cleanup', { ...item, nextAttemptAt: new Date(Date.now() - 1).toISOString() });
+    await ZX.Files.processCleanup();
+  }
+  item = await ZX.Database.get('cleanup', 'user/orphan.pdf');
+  assert.equal(item.attempts, 6);
+  await ZX.Files.processCleanup();
+  assert.equal(removeCalls, 6, 'exhausted cleanup must remain visible without hammering Storage');
+
+  const livePath = 'user/still-used.pdf';
+  await ZX.Files.queueCleanup(livePath);
+  await ZX.Database.put('records', { key: 'attachments:live', entity: 'attachments', id: 'live', data: { path: livePath }, deletedAt: null });
+  await ZX.Files.processCleanup();
+  assert.equal(await ZX.Database.get('cleanup', livePath), undefined);
+  assert.equal(removeCalls, 6);
+  await ZX.Files.clearLocal();
 });
 
 test('TUS upload resumes a previous fingerprint and preserves a folder path', async () => {
