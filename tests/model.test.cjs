@@ -67,6 +67,20 @@ test('weekly schedules round-trip as one student rule instead of repeated lesson
   assert.equal([...records.values()].filter(item => item.entity === 'students').length, 1);
 });
 
+test('one student can keep multiple weekly lessons across days and on the same day', () => {
+  const original = fixture();
+  original.students[0].weeklySchedules = [
+    { id: 'weekly-mon-am', title: '周一生物', weekday: 1, startTime: '09:00', endTime: '10:00', note: '', createdAt: '2026-09-14T08:00:00.000Z' },
+    { id: 'weekly-mon-pm', title: '周一数学', weekday: 1, startTime: '18:00', endTime: '19:30', note: '', createdAt: '2026-09-14T08:01:00.000Z' },
+    { id: 'weekly-sat', title: '周六物理', weekday: 6, startTime: '14:00', endTime: '15:30', note: '', createdAt: '2026-09-14T08:02:00.000Z' }
+  ];
+  const records = Model.flatten(original);
+  const restored = Model.hydrate(records, original.activeId).students[0].weeklySchedules;
+  assert.equal(restored.length, 3);
+  assert.deepEqual(Array.from(restored, item => [item.weekday, item.startTime]), [[1, '09:00'], [1, '18:00'], [6, '14:00']]);
+  assert.equal([...records.values()].filter(item => item.entity === 'students').length, 1);
+});
+
 test('legacy data-url attachments survive v2 normalization', () => {
   const original = fixture();
   original.students[0].preparations[0].files[0] = { id: '55555555-5555-4555-8555-555555555555', name: '旧讲义.txt', type: 'text/plain', data: 'data:text/plain;base64,5YaF5a65' };

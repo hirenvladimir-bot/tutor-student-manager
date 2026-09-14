@@ -775,7 +775,7 @@ test('a student weekly schedule expands through the month and calendar edits upd
   await page.locator('#weeklyScheduleForm [name=weekday]').selectOption('1');
   await page.locator('#weeklyScheduleForm [name=startTime]').fill('18:00');
   await page.locator('#weeklyScheduleForm [name=endTime]').fill('19:30');
-  await page.getByRole('button', { name: '保存固定安排' }).click();
+  await page.getByRole('button', { name: '保存课时', exact: true }).click();
 
   await expect(page.locator('#weeklyScheduleList .student-schedule-item')).toContainText('每周数学辅导');
   await expect(page.locator('#weeklyScheduleList .student-schedule-item')).toContainText('周一 18:00–19:30');
@@ -792,12 +792,12 @@ test('a student weekly schedule expands through the month and calendar edits upd
   }
 
   await page.locator('.calendar-day[data-date="2026-09-14"] .calendar-event.recurring').click();
-  await expect(page.locator('#weeklyScheduleDialogTitle')).toHaveText('编辑每周课程');
+  await expect(page.locator('#weeklyScheduleDialogTitle')).toHaveText('编辑每周课时');
   await page.locator('#weeklyScheduleForm [name=title]').fill('每周物理辅导');
   await page.locator('#weeklyScheduleForm [name=weekday]').selectOption('4');
   await page.locator('#weeklyScheduleForm [name=startTime]').fill('19:00');
   await page.locator('#weeklyScheduleForm [name=endTime]').fill('20:00');
-  await page.getByRole('button', { name: '保存固定安排' }).click();
+  await page.getByRole('button', { name: '保存课时', exact: true }).click();
 
   for (const date of mondays) await expect(page.locator(`.calendar-day[data-date="${date}"] .calendar-event.recurring`)).toHaveCount(0);
   for (const date of ['2026-09-03', '2026-09-10', '2026-09-17', '2026-09-24']) {
@@ -812,6 +812,101 @@ test('a student weekly schedule expands through the month and calendar edits upd
   expect(await page.evaluate(() => active().scheduleEntries.length)).toBe(0);
 });
 
+test('one student can keep multiple weekly lessons across days and time slots independently', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name.startsWith('mobile-'), 'the compact agenda intentionally replaces date cells on phones');
+  await page.locator('#emptyAddButton').click();
+  await page.locator('#studentForm [name=name]').fill('多课时学生');
+  await page.getByRole('button', { name: '保存档案' }).click();
+
+  const fillWeeklyLesson = async ({ title, weekday, startTime, endTime }) => {
+    await page.locator('#weeklyScheduleForm [name=title]').fill(title);
+    await page.locator('#weeklyScheduleForm [name=weekday]').selectOption(weekday);
+    await page.locator('#weeklyScheduleForm [name=startTime]').fill(startTime);
+    await page.locator('#weeklyScheduleForm [name=endTime]').fill(endTime);
+  };
+
+  await page.locator('#addWeeklyScheduleButton').click();
+  await expect(page.locator('#weeklyScheduleDialogTitle')).toHaveText('添加每周课时');
+  await fillWeeklyLesson({ title: '周一早课', weekday: '1', startTime: '08:00', endTime: '09:00' });
+  await page.locator('#saveAndAddWeeklyScheduleBtn').click();
+  await expect(page.locator('#weeklyScheduleDialogTitle')).toHaveText('继续添加每周课时');
+  await expect(page.locator('#weeklyScheduleMessage')).toContainText('已保存周一 08:00–09:00');
+  await fillWeeklyLesson({ title: '周三晚课', weekday: '3', startTime: '18:00', endTime: '19:30' });
+  await page.locator('#saveAndAddWeeklyScheduleBtn').click();
+  await expect(page.locator('#weeklyScheduleMessage')).toContainText('已保存周三 18:00–19:30');
+  await fillWeeklyLesson({ title: '周一第二节', weekday: '1', startTime: '10:00', endTime: '11:00' });
+  await page.getByRole('button', { name: '保存课时', exact: true }).click();
+  await expect(page.locator('#weeklyScheduleDialog')).not.toHaveAttribute('open', '');
+
+  const weeklyItems = page.locator('#weeklyScheduleList .student-schedule-item');
+  await expect(weeklyItems).toHaveCount(3);
+  await expect(weeklyItems.filter({ hasText: '周一早课' })).toContainText('周一 08:00–09:00');
+  await expect(weeklyItems.filter({ hasText: '周一第二节' })).toContainText('周一 10:00–11:00');
+  await expect(weeklyItems.filter({ hasText: '周三晚课' })).toContainText('周三 18:00–19:30');
+  await expect.poll(() => page.evaluate(() => active().weeklySchedules.length)).toBe(3);
+
+  await page.locator('#addStudentScheduleButton').click();
+  await page.locator('#scheduleForm [name=title]').fill('临时加课');
+  await page.locator('#scheduleForm [name=date]').fill('2026-09-17');
+  await page.locator('#scheduleForm [name=startTime]').fill('12:00');
+  await page.locator('#scheduleForm [name=endTime]').fill('13:00');
+  await page.getByRole('button', { name: '保存课程' }).click();
+
+  await page.evaluate(() => { calendarCursor = new Date(2026, 8, 1); });
+  await page.locator('#openStudentCalendarButton').click();
+  const mondays = ['2026-09-07', '2026-09-14', '2026-09-21', '2026-09-28'];
+  const wednesdays = ['2026-09-02', '2026-09-09', '2026-09-16', '2026-09-23', '2026-09-30'];
+  for (const date of mondays) {
+    const occurrences = page.locator(`.calendar-day[data-date="${date}"] .calendar-event.recurring`);
+    await expect(occurrences).toHaveCount(2);
+    await expect(occurrences.filter({ hasText: '周一早课' })).toHaveCount(1);
+    await expect(occurrences.filter({ hasText: '周一第二节' })).toHaveCount(1);
+  }
+  for (const date of wednesdays) {
+    await expect(page.locator(`.calendar-day[data-date="${date}"] .calendar-event.recurring`).filter({ hasText: '周三晚课' })).toHaveCount(1);
+  }
+  await expect(page.locator('.calendar-day[data-date="2026-09-17"] .calendar-event:not(.recurring)')).toContainText('多课时学生 · 临时加课');
+
+  await page.locator('.calendar-day[data-date="2026-09-14"] .calendar-event.recurring').filter({ hasText: '周一第二节' }).click();
+  await expect(page.locator('#weeklyScheduleDialogTitle')).toHaveText('编辑每周课时');
+  await page.locator('#weeklyScheduleForm [name=title]').fill('周一第二节（调整）');
+  await page.locator('#weeklyScheduleForm [name=startTime]').fill('10:30');
+  await page.locator('#weeklyScheduleForm [name=endTime]').fill('11:30');
+  await page.getByRole('button', { name: '保存课时', exact: true }).click();
+  for (const date of mondays) {
+    const occurrences = page.locator(`.calendar-day[data-date="${date}"] .calendar-event.recurring`);
+    await expect(occurrences).toHaveCount(2);
+    await expect(occurrences.filter({ hasText: '周一早课' })).toHaveCount(1);
+    await expect(occurrences.filter({ hasText: '周一第二节（调整）' })).toContainText('10:30–11:30');
+  }
+
+  await page.locator('.calendar-day[data-date="2026-09-16"] .calendar-event.recurring').filter({ hasText: '周三晚课' }).click();
+  await page.locator('#deleteWeeklyScheduleBtn').click();
+  await expect(page.locator('#confirmDialog')).toHaveAttribute('open', '');
+  await page.locator('#confirmAccept').click();
+  await expect(page.locator('.calendar-event.recurring').filter({ hasText: '周三晚课' })).toHaveCount(0);
+  for (const date of mondays) {
+    const occurrences = page.locator(`.calendar-day[data-date="${date}"] .calendar-event.recurring`);
+    await expect(occurrences.filter({ hasText: '周一早课' })).toHaveCount(1);
+    await expect(occurrences.filter({ hasText: '周一第二节（调整）' })).toHaveCount(1);
+  }
+  await expect(page.locator('.calendar-day[data-date="2026-09-17"] .calendar-event:not(.recurring)')).toContainText('临时加课');
+
+  await page.locator('#closeCalendarDialog').click();
+  await expect(weeklyItems).toHaveCount(2);
+  await expect(page.locator('#studentScheduleList .student-schedule-item')).toContainText('临时加课');
+  await page.reload();
+  await expect(page.locator('#weeklyScheduleList .student-schedule-item')).toHaveCount(2);
+  await expect(page.locator('#weeklyScheduleList')).toContainText('周一早课');
+  await expect(page.locator('#weeklyScheduleList')).toContainText('周一第二节（调整）');
+  await expect(page.locator('#weeklyScheduleList')).not.toContainText('周三晚课');
+  await expect(page.locator('#studentScheduleList .student-schedule-item')).toContainText('临时加课');
+  await expect.poll(() => page.evaluate(() => ({
+    weekly: active().weeklySchedules.length,
+    once: active().scheduleEntries.length
+  }))).toEqual({ weekly: 2, once: 1 });
+});
+
 test('weekly schedules stay linked to their student and deletion leaves other rules and one-time lessons intact', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name.startsWith('mobile-'), 'the compact agenda intentionally replaces date cells on phones');
   await page.locator('#emptyAddButton').click();
@@ -822,7 +917,7 @@ test('weekly schedules stay linked to their student and deletion leaves other ru
   await page.locator('#weeklyScheduleForm [name=weekday]').selectOption('1');
   await page.locator('#weeklyScheduleForm [name=startTime]').fill('08:00');
   await page.locator('#weeklyScheduleForm [name=endTime]').fill('09:00');
-  await page.getByRole('button', { name: '保存固定安排' }).click();
+  await page.getByRole('button', { name: '保存课时', exact: true }).click();
   await page.locator('#addStudentScheduleButton').click();
   await page.locator('#scheduleForm [name=title]').fill('甲的单次课');
   await page.locator('#scheduleForm [name=date]').fill('2026-09-16');
@@ -838,7 +933,7 @@ test('weekly schedules stay linked to their student and deletion leaves other ru
   await page.locator('#weeklyScheduleForm [name=weekday]').selectOption('2');
   await page.locator('#weeklyScheduleForm [name=startTime]').fill('10:00');
   await page.locator('#weeklyScheduleForm [name=endTime]').fill('11:00');
-  await page.getByRole('button', { name: '保存固定安排' }).click();
+  await page.getByRole('button', { name: '保存课时', exact: true }).click();
 
   await page.evaluate(() => { calendarCursor = new Date(2026, 8, 1); });
   await page.locator('#openStudentCalendarButton').click();
@@ -877,7 +972,7 @@ test('weekly schedule entry points fit a mobile viewport without horizontal over
   await page.locator('#weeklyScheduleForm [name=weekday]').selectOption('6');
   await page.locator('#weeklyScheduleForm [name=startTime]').fill('09:00');
   await page.locator('#weeklyScheduleForm [name=endTime]').fill('10:00');
-  await page.getByRole('button', { name: '保存固定安排' }).click();
+  await page.getByRole('button', { name: '保存课时', exact: true }).click();
   await expect(page.locator('#weeklyScheduleList')).toContainText('周六 09:00–10:00');
   await page.locator('#openStudentCalendarButton').click();
   await expect(page.locator('#calendarAgenda')).toContainText('手机每周课程');
